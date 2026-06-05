@@ -1,5 +1,6 @@
 package com.xiaoming.hunterwildcard.compass;
 
+import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.util.PlayerUtil;
 import com.xiaoming.hunterwildcard.wildcard.WildcardRule;
@@ -34,8 +35,14 @@ public class CompassTracker {
             return;
         }
 
-        updateTicks = context.getConfig().compassUpdateTicks;
+        updateTicks = context.getConfig().getCompassUpdateTicks();
         updateHunterCompasses(context, activeRule);
+    }
+
+    public void onConfigChanged(ModConfig config) {
+        if (updateTicks > config.getCompassUpdateTicks()) {
+            updateTicks = config.getCompassUpdateTicks();
+        }
     }
 
     public void giveCompasses(GameContext context) {

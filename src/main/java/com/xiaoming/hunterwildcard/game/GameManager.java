@@ -1,6 +1,7 @@
 package com.xiaoming.hunterwildcard.game;
 
 import com.xiaoming.hunterwildcard.compass.CompassTracker;
+import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.respawn.RespawnManager;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
 import com.xiaoming.hunterwildcard.team.TeamManager;
@@ -20,11 +21,15 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
 import java.util.Random;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 public class GameManager {
     private static final GameManager INSTANCE = new GameManager();
 
-    private final GameConfig config = new GameConfig();
+    private final ModConfig config = ModConfig.load();
     private final TeamManager teamManager = new TeamManager();
     private final BossBarManager bossBarManager = new BossBarManager();
     private final MessageManager messageManager = new MessageManager();
@@ -32,6 +37,7 @@ public class GameManager {
     private final RespawnManager respawnManager = new RespawnManager();
     private final WildcardManager wildcardManager = new WildcardManager(bossBarManager, messageManager);
     private final Random random = new Random();
+    private final Set<UUID> debugMenuPlayers = new HashSet<>();
 
     private GameState state = GameState.WAITING;
     private MinecraftServer server;
@@ -39,6 +45,7 @@ public class GameManager {
     private int endingTicks;
     private int actionBarTicks;
     private boolean eventsRegistered;
+    private UUID wildcardTestPlayerUuid;
 
     private GameManager() {
     }
@@ -76,15 +83,19 @@ public class GameManager {
         }
 
         server = source.getServer();
+        if (wildcardManager.getActiveRule() != null) {
+            wildcardManager.clear(debugContext(server));
+            wildcardTestPlayerUuid = null;
+        }
         state = GameState.PREPARING;
-        preparingTicks = config.preparingTicks;
+        preparingTicks = config.getPreparingTicks();
         endingTicks = 0;
         actionBarTicks = 0;
         wildcardManager.reset();
         respawnManager.clear();
         compassTracker.reset();
 
-        messageManager.broadcast(server, "游戏开始准备，60 秒后进入追杀阶段。");
+        messageManager.broadcast(server, "游戏开始准备，" + config.preparingSeconds + " 秒后进入追杀阶段。");
         source.sendFeedback(() -> Text.literal("猎人外卡已进入 PREPARING。"), true);
     }
 
@@ -147,11 +158,113 @@ public class GameManager {
         return wildcardManager;
     }
 
-    public GameConfig getConfig() {
+    public ModConfig getConfig() {
         return config;
     }
 
+    public MessageManager getMessageManager() {
+        return messageManager;
+    }
+
+    public void setDebugMenuEnabled(ServerPlayerEntity player, boolean enabled) {
+        if (enabled) {
+            debugMenuPlayers.add(player.getUuid());
+        } else {
+            debugMenuPlayers.remove(player.getUuid());
+        }
+    }
+
+    public boolean isDebugMenuEnabled(ServerPlayerEntity player) {
+        return debugMenuPlayers.contains(player.getUuid());
+    }
+
+    public void applyConfig(ModConfig newConfig) {
+        config.copyFrom(newConfig);
+        notifyConfigChanged();
+    }
+
+    public boolean saveConfig() {
+        return config.save();
+    }
+
+    public boolean reloadConfig() {
+        config.copyFrom(ModConfig.load());
+        notifyConfigChanged();
+        return true;
+    }
+
+    public void reloadConfig(ServerCommandSource source) {
+        reloadConfig();
+        source.sendFeedback(() -> Text.literal("已重新读取 config/hunterwildcard.json。"), true);
+    }
+
+    public void saveConfig(ServerCommandSource source) {
+        if (saveConfig()) {
+            source.sendFeedback(() -> Text.literal("已保存 config/hunterwildcard.json。"), true);
+        } else {
+            source.sendError(Text.literal("保存配置失败，请检查服务器日志。"));
+        }
+    }
+
+    public void rollWildcard(ServerCommandSource source) {
+        if (state != GameState.RUNNING) {
+            source.sendError(Text.literal("只有 RUNNING 阶段可以手动触发外卡。"));
+            return;
+        }
+
+        boolean started = wildcardManager.rollNow(context());
+        if (started) {
+            source.sendFeedback(() -> Text.literal("已手动随机触发外卡。"), true);
+        } else {
+            source.sendError(Text.literal("没有可用外卡。"));
+        }
+    }
+
+    public void testWildcard(ServerCommandSource source, String wildcardName, ServerPlayerEntity tester) {
+        MinecraftServer targetServer = source.getServer();
+        GameContext testContext = new GameContext(targetServer, config, teamManager, random, List.of(tester));
+        boolean started = wildcardManager.startRuleByName(testContext, wildcardName);
+        if (started) {
+            server = targetServer;
+            wildcardTestPlayerUuid = tester.getUuid();
+            source.sendFeedback(() -> Text.literal("已测试触发外卡: " + wildcardName), true);
+        } else {
+            source.sendError(Text.literal("该外卡不可用或已关闭: " + wildcardName));
+        }
+    }
+
+    public void stopWildcard(ServerCommandSource source) {
+        if (state != GameState.RUNNING) {
+            source.sendError(Text.literal("只有 RUNNING 阶段可以停止外卡。"));
+            return;
+        }
+
+        boolean stopped = wildcardManager.stopActiveRule(context());
+        if (stopped) {
+            source.sendFeedback(() -> Text.literal("已停止当前外卡。"), true);
+        } else {
+            source.sendError(Text.literal("当前没有正在运行的外卡。"));
+        }
+    }
+
+    public void debugStopWildcard(ServerCommandSource source) {
+        GameContext testContext = state == GameState.RUNNING && server != null ? context() : debugContext(source.getServer());
+        boolean stopped = wildcardManager.stopActiveRule(testContext);
+        if (stopped) {
+            wildcardTestPlayerUuid = null;
+            source.sendFeedback(() -> Text.literal("已停止当前外卡。"), true);
+        } else {
+            source.sendError(Text.literal("当前没有正在运行的外卡。"));
+        }
+    }
+
     private void tick(MinecraftServer tickServer) {
+        if (state == GameState.WAITING && wildcardManager.getActiveRule() != null) {
+            server = tickServer;
+            wildcardManager.tick(debugContext(tickServer));
+            return;
+        }
+
         if (state == GameState.WAITING) {
             return;
         }
@@ -177,7 +290,7 @@ public class GameManager {
         actionBarTicks--;
 
         if (actionBarTicks <= 0) {
-            actionBarTicks = config.actionBarIntervalTicks;
+            actionBarTicks = config.getActionBarIntervalTicks();
             int seconds = Math.max(0, preparingTicks / 20);
             messageManager.actionBar(context(), "准备阶段 | " + seconds + " 秒后开始追杀");
         }
@@ -204,7 +317,7 @@ public class GameManager {
 
         actionBarTicks--;
         if (actionBarTicks <= 0) {
-            actionBarTicks = config.actionBarIntervalTicks;
+            actionBarTicks = config.getActionBarIntervalTicks();
             for (ServerPlayerEntity player : context.getParticipants()) {
                 PlayerRole role = teamManager.getRole(player);
                 String roleName = role == null ? "旁观" : role.getDisplayName();
@@ -235,8 +348,8 @@ public class GameManager {
         }
 
         if (role == PlayerRole.HUNTER) {
-            respawnManager.onHunterDeath(player, config.hunterRespawnTicks);
-            messageManager.toParticipants(context, "猎人 " + player.getName().getString() + " 死亡，将在 10 秒后重新加入追杀。");
+            respawnManager.onHunterDeath(player, config.getHunterRespawnTicks());
+            messageManager.toParticipants(context, "猎人 " + player.getName().getString() + " 死亡，将在 " + config.hunterRespawnSeconds + " 秒后重新加入追杀。");
         }
     }
 
@@ -252,6 +365,10 @@ public class GameManager {
     }
 
     private void handleDisconnect(ServerPlayerEntity player) {
+        debugMenuPlayers.remove(player.getUuid());
+        if (player.getUuid().equals(wildcardTestPlayerUuid)) {
+            wildcardTestPlayerUuid = null;
+        }
         PlayerRole role = teamManager.leave(player);
         respawnManager.remove(player);
         if (role != null && state != GameState.WAITING) {
@@ -284,7 +401,7 @@ public class GameManager {
         }
 
         state = GameState.ENDING;
-        endingTicks = config.endingTicks;
+        endingTicks = config.getEndingTicks();
         clearRoundEffects(context());
         messageManager.broadcast(server, reason);
     }
@@ -292,7 +409,7 @@ public class GameManager {
     private void cleanupAndReset(MinecraftServer cleanupServer) {
         MinecraftServer targetServer = cleanupServer != null ? cleanupServer : server;
         if (targetServer != null) {
-            clearRoundEffects(new GameContext(targetServer, config, teamManager, random));
+            clearRoundEffects(debugContext(targetServer));
         }
 
         teamManager.clear();
@@ -301,6 +418,7 @@ public class GameManager {
         preparingTicks = 0;
         endingTicks = 0;
         actionBarTicks = 0;
+        wildcardTestPlayerUuid = null;
         wildcardManager.reset();
         compassTracker.reset();
         respawnManager.clear();
@@ -323,5 +441,23 @@ public class GameManager {
 
     private GameContext context() {
         return new GameContext(server, config, teamManager, random);
+    }
+
+    private GameContext debugContext(MinecraftServer targetServer) {
+        if (wildcardTestPlayerUuid == null) {
+            return new GameContext(targetServer, config, teamManager, random);
+        }
+
+        ServerPlayerEntity tester = targetServer.getPlayerManager().getPlayer(wildcardTestPlayerUuid);
+        if (tester == null) {
+            return new GameContext(targetServer, config, teamManager, random);
+        }
+
+        return new GameContext(targetServer, config, teamManager, random, List.of(tester));
+    }
+
+    private void notifyConfigChanged() {
+        wildcardManager.onConfigChanged(config);
+        compassTracker.onConfigChanged(config);
     }
 }

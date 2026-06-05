@@ -9,12 +9,12 @@ import net.minecraft.server.network.ServerPlayerEntity;
 public class SpeedRushRule implements WildcardRule {
     @Override
     public String getName() {
-        return "SpeedRush";
+        return "疾速追猎";
     }
 
     @Override
     public void onStart(GameContext context) {
-        apply(context, context.getConfig().wildcardDurationTicks + 40);
+        apply(context, context.getConfig().getWildcardDurationTicks() + 40);
     }
 
     @Override

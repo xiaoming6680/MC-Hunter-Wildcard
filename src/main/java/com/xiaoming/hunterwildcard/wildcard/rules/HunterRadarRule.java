@@ -10,28 +10,26 @@ import net.minecraft.util.Formatting;
 public class HunterRadarRule implements WildcardRule {
     @Override
     public String getName() {
-        return "HunterRadar";
+        return "猎人雷达";
     }
 
     @Override
     public void onTick(GameContext context, int remainingTicks) {
-        if (remainingTicks <= 0 || remainingTicks % context.getConfig().hunterRadarIntervalTicks != 0) {
+        if (remainingTicks <= 0 || remainingTicks % context.getConfig().getHunterRadarIntervalTicks() != 0) {
             return;
         }
 
         for (ServerPlayerEntity hunter : context.getHunters()) {
-            ServerPlayerEntity runner = PlayerUtil.findNearestRunner(hunter, context.getRunners());
+            ServerPlayerEntity runner = PlayerUtil.findNearestRunnerInSameWorld(hunter, context.getRunners());
             if (runner == null) {
-                continue;
-            }
-
-            if (hunter.getEntityWorld() != runner.getEntityWorld()) {
-                hunter.sendMessage(Text.literal("雷达: 最近的逃亡者在其他维度。").formatted(Formatting.RED));
+                if (!context.getRunners().isEmpty()) {
+                    hunter.sendMessage(Text.literal("雷达: 最近的逃亡者在其他维度。").formatted(Formatting.RED));
+                }
                 continue;
             }
 
             int distance = PlayerUtil.roundDistance(Math.sqrt(hunter.squaredDistanceTo(runner)));
-            hunter.sendMessage(Text.literal("雷达: 最近逃亡者约 " + distance + " 米。").formatted(Formatting.AQUA));
+            hunter.sendMessage(Text.literal("雷达: 最近逃亡者 " + runner.getName().getString() + " 约 " + distance + " 米。").formatted(Formatting.AQUA));
         }
     }
 }

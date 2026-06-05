@@ -9,12 +9,12 @@ import net.minecraft.server.network.ServerPlayerEntity;
 public class GlowingRule implements WildcardRule {
     @Override
     public String getName() {
-        return "Glowing";
+        return "全员发光";
     }
 
     @Override
     public void onStart(GameContext context) {
-        apply(context, context.getConfig().wildcardDurationTicks + 40);
+        apply(context, context.getConfig().getWildcardDurationTicks() + 40);
     }
 
     @Override

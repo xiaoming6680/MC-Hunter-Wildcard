@@ -23,6 +23,25 @@ public final class PlayerUtil {
         return nearest;
     }
 
+    public static ServerPlayerEntity findNearestRunnerInSameWorld(ServerPlayerEntity hunter, List<ServerPlayerEntity> runners) {
+        ServerPlayerEntity nearest = null;
+        double nearestDistance = Double.MAX_VALUE;
+
+        for (ServerPlayerEntity runner : runners) {
+            if (hunter.getEntityWorld() != runner.getEntityWorld()) {
+                continue;
+            }
+
+            double distance = hunter.squaredDistanceTo(runner);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = runner;
+            }
+        }
+
+        return nearest;
+    }
+
     public static double distanceSquared(ServerPlayerEntity a, ServerPlayerEntity b) {
         if (a.getEntityWorld() != b.getEntityWorld()) {
             return Double.MAX_VALUE / 4.0;
@@ -36,6 +55,6 @@ public final class PlayerUtil {
             return -1;
         }
 
-        return Math.max(0, (int) Math.round(distance / 50.0) * 50);
+        return Math.max(0, (int) Math.round(distance));
     }
 }

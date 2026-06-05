@@ -18,7 +18,7 @@ import java.util.Random;
 public class SupplyDropRule implements WildcardRule {
     @Override
     public String getName() {
-        return "SupplyDrop";
+        return "补给空投";
     }
 
     @Override
@@ -28,7 +28,7 @@ public class SupplyDropRule implements WildcardRule {
 
     @Override
     public void onTick(GameContext context, int remainingTicks) {
-        if (remainingTicks > 0 && remainingTicks % context.getConfig().supplyDropIntervalTicks == 0) {
+        if (remainingTicks > 0 && remainingTicks % context.getConfig().getSupplyDropIntervalTicks() == 0) {
             spawnSupplyDrop(context);
         }
     }

@@ -6,3 +6,8 @@ out/
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# Codex planning notes
+task_plan.md
+findings.md
+progress.md

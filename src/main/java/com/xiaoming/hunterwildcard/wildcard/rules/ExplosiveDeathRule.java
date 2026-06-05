@@ -8,7 +8,7 @@ import net.minecraft.world.World;
 public class ExplosiveDeathRule implements WildcardRule {
     @Override
     public String getName() {
-        return "ExplosiveDeath";
+        return "死亡爆炸";
     }
 
     @Override

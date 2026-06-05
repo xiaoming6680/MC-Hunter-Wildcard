@@ -9,7 +9,7 @@ import net.minecraft.world.Heightmap;
 public class CompassChaosRule implements WildcardRule {
     @Override
     public String getName() {
-        return "CompassChaos";
+        return "指南针干扰";
     }
 
     @Override
