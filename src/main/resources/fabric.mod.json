@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "hunterwildcard",
+  "version": "${version}",
+  "name": "小铭的猎人外卡",
+  "description": "Minecraft Manhunt with rotating wildcard rules.",
+  "authors": [
+    "XM6680"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.xiaoming.hunterwildcard.HunterWildcardMod"
+    ]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.0",
+    "minecraft": "1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}
