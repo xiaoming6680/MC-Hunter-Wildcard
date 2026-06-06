@@ -132,6 +132,14 @@ public class WildcardManager {
         return activeRule == null ? null : activeRule.getName();
     }
 
+    public int getActiveRemainingTicks() {
+        return activeRule == null ? -1 : Math.max(0, activeRemainingTicks);
+    }
+
+    public int getTicksUntilNextWildcard() {
+        return activeRule == null ? ticksUntilNextWildcard : -1;
+    }
+
     public List<WildcardStatus> getRuleStatuses(ModConfig config) {
         List<WildcardStatus> statuses = new ArrayList<>();
         for (WildcardRule rule : rules) {

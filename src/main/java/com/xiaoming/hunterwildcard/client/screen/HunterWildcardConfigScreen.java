@@ -1,14 +1,22 @@
 package com.xiaoming.hunterwildcard.client.screen;
 
+import com.xiaoming.hunterwildcard.client.screen.widget.DropdownWidget;
+import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameState;
+import com.xiaoming.hunterwildcard.game.HunterVictoryType;
+import com.xiaoming.hunterwildcard.game.RunnerVictoryType;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.ConfigSnapshot;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.DebugAction;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.GameAction;
+import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.OperationResultPayload;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.SyncConfigPayload;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets.TeamAction;
+import com.xiaoming.hunterwildcard.respawn.RespawnMode;
+import com.xiaoming.hunterwildcard.respawn.RunnerTeamLossMode;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -22,9 +30,45 @@ import java.util.List;
 import java.util.Map;
 
 public class HunterWildcardConfigScreen extends Screen {
+    private static final int CARD_PADDING_X = 10;
+    private static final int CARD_PADDING_TOP = 10;
+    private static final int CARD_PADDING_BOTTOM = 8;
+    private static final int CARD_TITLE_HEIGHT = 13;
+    private static final int ROW_HEIGHT = 20;
+    private static final int ROW_GAP = 3;
+    private static final int CARD_GAP = 8;
+    private static final int COMPACT_CARD_GAP = 12;
+    private static final int SMALL_CARD_MAX_WIDTH = 300;
+    private static final int MEDIUM_CARD_MAX_WIDTH = 320;
+    private static final int LARGE_CARD_MAX_WIDTH = 420;
+    private static final int STATUS_BLOCK_MAX_WIDTH = 160;
+    private static final int WILDCARD_TOGGLE_TARGET_WIDTH = 150;
+    private static final int WILDCARD_TOGGLE_MAX_WIDTH = 180;
+    private static final int WILDCARD_TOGGLE_HEIGHT = 30;
+    private static final int TWO_COLUMN_GAP = COMPACT_CARD_GAP;
+    private static final int TWO_COLUMN_MIN_WIDTH = 460;
+    private static final int LABEL_WIDTH = 112;
+    private static final int CONTROL_WIDTH = 104;
+    private static final int DROPDOWN_WIDTH = 180;
+    private static final int UNIT_WIDTH = 24;
+    private static final int CONTROL_HEIGHT = 18;
+    private static final int BUTTON_HEIGHT = 22;
+    private static final int BUTTON_GAP = 6;
+    private static final int HINT_HEIGHT = 12;
+    private static final int SCROLL_STEP = 32;
+    private static final int SCROLL_BAR_RESERVE = 12;
+    private static final long TOAST_FADE_IN_MS = 140L;
+    private static final long TOAST_HOLD_MS = 1800L;
+    private static final long TOAST_FADE_OUT_MS = 220L;
+    private static ConfigSnapshot cachedEditableConfig;
+
     private final List<Label> labels = new ArrayList<>();
     private final List<Box> boxes = new ArrayList<>();
     private final Map<NumberField, TextFieldWidget> numberFields = new EnumMap<>(NumberField.class);
+    private final Map<StringField, TextFieldWidget> stringFields = new EnumMap<>(StringField.class);
+    private final Map<DropdownField, DropdownWidget> dropdownFields = new EnumMap<>(DropdownField.class);
+    private final Map<Page, Float> pageScrollOffsets = new EnumMap<>(Page.class);
+    private final Map<Page, Float> pageTargetScrollOffsets = new EnumMap<>(Page.class);
 
     private Page currentPage = Page.GAME;
     private SyncConfigPayload serverSync;
@@ -32,9 +76,27 @@ public class HunterWildcardConfigScreen extends Screen {
     private boolean canManage;
     private boolean requested;
     private int refreshTicks;
-    private int contentScroll;
+    private float scrollOffset;
+    private float targetScrollOffset;
+    private float maxScroll;
+    private float navScroll;
+    private float maxNavScroll;
+    private int renderedScroll;
     private int pageContentHeight;
     private String statusMessage = "正在请求服务器数据...";
+    private StatusKind statusKind = StatusKind.INFO;
+    private String toastMessage = "";
+    private StatusKind toastKind = StatusKind.INFO;
+    private long toastStartTimeMs;
+    private long toastDurationMs;
+    private String hoverTooltip = "";
+    private int hoverTooltipX;
+    private int hoverTooltipY;
+    private boolean hasSyncedOnce;
+    private boolean manualReloadRequested;
+    private boolean manualSaveRequested;
+    private StyledButtonWidget saveButton;
+    private ToggleField selectedWildcardSettings;
 
     public HunterWildcardConfigScreen() {
         super(Text.literal("猎人外卡"));
@@ -47,27 +109,49 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    public static void receiveOperationResult(OperationResultPayload payload) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.currentScreen instanceof HunterWildcardConfigScreen screen) {
+            if (payload.success()) {
+                cachedEditableConfig = null;
+                screen.showToast(payload.message(), StatusKind.SUCCESS);
+            } else {
+                screen.showToast(payload.message(), StatusKind.ERROR);
+            }
+        }
+    }
+
     @Override
     protected void init() {
         labels.clear();
         boxes.clear();
         numberFields.clear();
-
-        if (!isDebugPageEnabled() && currentPage == Page.DEBUG) {
-            currentPage = Page.GAME;
-        }
+        stringFields.clear();
+        dropdownFields.clear();
+        saveButton = null;
 
         Layout layout = layout();
-        contentScroll = Math.min(contentScroll, maxContentScroll(layout));
-        pageContentHeight = layout.contentHeight();
+        clampScroll(layout);
+        renderedScroll = Math.round(scrollOffset);
+        int buildScroll = renderedScroll;
+        pageContentHeight = layout.viewportHeight();
+        ensureVisiblePage();
         buildNavigation(layout);
-        labels.add(new Label(currentPage.label, layout.contentX(), layout.panelY() + 14, 0xFFFFFFFF, true));
 
         switch (currentPage) {
             case GAME -> buildGamePage(layout);
             case TEAM -> buildTeamPage(layout);
-            case CONFIG -> buildConfigPage(layout);
+            case BASIC -> buildBasicPage(layout);
+            case VICTORY -> buildVictoryPage(layout);
+            case RESPAWN -> buildRespawnPage(layout);
+            case WILDCARD -> buildWildcardPage(layout);
             case DEBUG -> buildDebugPage(layout);
+        }
+
+        updateMaxScroll(layout);
+        if (renderedScroll != buildScroll) {
+            clearAndInit();
+            return;
         }
 
         buildFooter(layout);
@@ -81,13 +165,21 @@ public class HunterWildcardConfigScreen extends Screen {
     @Override
     public void render(DrawContext context, int mouseX, int mouseY, float delta) {
         Layout layout = layout();
+        if (updateSmoothScroll(layout, delta)) {
+            clearAndInit();
+            layout = layout();
+        }
+
         context.fill(0, 0, width, height, 0x88000000);
         context.fill(layout.panelX(), layout.panelY(), layout.panelX() + layout.panelWidth(), layout.panelY() + layout.panelHeight(), 0xD0161B22);
         context.fill(layout.panelX(), layout.panelY(), layout.panelX() + layout.navWidth(), layout.panelY() + layout.panelHeight(), 0xE01E252D);
         context.fill(layout.panelX() + layout.navWidth(), layout.panelY(), layout.panelX() + layout.navWidth() + 1, layout.panelY() + layout.panelHeight(), 0xFF35404B);
 
         context.drawText(textRenderer, Text.literal("猎人外卡"), layout.panelX() + 12, layout.panelY() + 13, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(currentPage.label), layout.contentX(), layout.panelY() + 14, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(currentPage.description), layout.contentX(), layout.panelY() + 29, 0xFF9FAAB4, false);
 
+        context.enableScissor(layout.contentX(), layout.viewportTop(), layout.contentX() + layout.usableContentWidth(), layout.viewportBottom());
         for (Box box : boxes) {
             context.fill(box.x, box.y, box.x + box.width, box.y + box.height, box.color);
             context.fill(box.x, box.y, box.x + box.width, box.y + 1, box.borderColor);
@@ -99,36 +191,87 @@ public class HunterWildcardConfigScreen extends Screen {
         for (Label label : labels) {
             context.drawText(textRenderer, Text.literal(trim(label.text, label.maxWidth(layout))), label.x, label.y, label.color, label.shadow);
         }
+        context.disableScissor();
 
-        String footerMessage = trim(statusMessage, Math.max(80, layout.contentWidth()));
-        context.drawText(textRenderer, Text.literal(footerMessage), layout.contentX(), layout.panelY() + layout.panelHeight() - 14, 0xFFFFD966, false);
+        renderFooterStatus(context, layout);
         renderScrollBar(context, layout);
+        renderNavigationScrollBar(context, layout);
 
+        hoverTooltip = "";
+        if (saveButton != null) {
+            saveButton.active = canSaveConfig();
+        }
         super.render(context, mouseX, mouseY, delta);
+        renderToast(context, layout, delta);
+        renderDropdownOverlays(context, mouseX, mouseY, delta);
+        renderHoverTooltip(context);
+    }
+
+    @Override
+    public boolean mouseClicked(Click click, boolean doubled) {
+        double mouseX = click.x();
+        double mouseY = click.y();
+
+        for (DropdownWidget dropdown : dropdownFields.values()) {
+            if (dropdown.isExpanded() && dropdown.containsPoint(mouseX, mouseY)) {
+                if (dropdown.mouseClicked(click, doubled)) {
+                    return true;
+                }
+            }
+        }
+
+        for (DropdownWidget dropdown : dropdownFields.values()) {
+            if (dropdown.containsPoint(mouseX, mouseY)) {
+                if (dropdown.mouseClicked(click, doubled)) {
+                    return true;
+                }
+            }
+        }
+
+        closeDropdowns();
+        boolean handled = super.mouseClicked(click, doubled);
+        if (handled && isInsideContent(layout(), mouseX, mouseY)) {
+            ensureFocusedInputVisible(layout());
+        }
+        return handled;
     }
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
         Layout layout = layout();
+        if (isInsideNavigation(layout, mouseX, mouseY)) {
+            updateNavigationScroll(layout);
+            if (maxNavScroll > 0.5F) {
+                float delta = (float) (verticalAmount * SCROLL_STEP);
+                if (Math.abs(delta) < 0.5F) {
+                    delta = verticalAmount > 0 ? SCROLL_STEP : -SCROLL_STEP;
+                }
+                navScroll = clamp(navScroll - delta, 0.0F, maxNavScroll);
+                clearAndInit();
+                return true;
+            }
+        }
+
         if (!isInsideContent(layout, mouseX, mouseY)) {
             return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
 
-        int maxScroll = maxContentScroll(layout);
-        if (maxScroll <= 0) {
+        updateMaxScroll(layout);
+        if (maxScroll <= 0.5F) {
             return super.mouseScrolled(mouseX, mouseY, horizontalAmount, verticalAmount);
         }
 
-        if (currentPage == Page.CONFIG && !applyVisibleInputs(false)) {
+        if (isConfigEditPage() && !applyVisibleInputs(false)) {
             return true;
         }
 
-        int delta = (int) Math.round(verticalAmount * 22.0D);
-        if (delta == 0) {
-            delta = verticalAmount > 0 ? 22 : -22;
+        closeDropdowns();
+        float delta = (float) (verticalAmount * SCROLL_STEP);
+        if (Math.abs(delta) < 0.5F) {
+            delta = verticalAmount > 0 ? SCROLL_STEP : -SCROLL_STEP;
         }
-        contentScroll = clamp(contentScroll - delta, 0, maxScroll);
-        clearAndInit();
+        targetScrollOffset = clamp(targetScrollOffset - delta, 0.0F, maxScroll);
+        rememberCurrentScroll();
         return true;
     }
 
@@ -138,8 +281,21 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     @Override
+    public void close() {
+        if (isConfigEditPage() && editableConfig != null) {
+            if (!applyVisibleInputs(true)) {
+                return;
+            }
+            cachedEditableConfig = editableConfig;
+        }
+
+        closeDropdowns();
+        super.close();
+    }
+
+    @Override
     public void tick() {
-        if (currentPage == Page.CONFIG) {
+        if (isConfigEditPage()) {
             return;
         }
 
@@ -152,13 +308,23 @@ public class HunterWildcardConfigScreen extends Screen {
 
     private void buildNavigation(Layout layout) {
         int x = layout.panelX() + 10;
-        int y = layout.panelY() + 48;
+        int navTop = navigationTop(layout);
+        int navBottom = navigationBottom(layout);
+        int buttonHeight = 24;
+        int buttonGap = 6;
+        updateNavigationScroll(layout);
+        int y = navTop - Math.round(navScroll);
         for (Page page : visiblePages()) {
+            if (y + buttonHeight < navTop || y > navBottom) {
+                y += buttonHeight + buttonGap;
+                continue;
+            }
+
             StyledButtonWidget button = new StyledButtonWidget(
                     x,
                     y,
                     layout.navWidth() - 20,
-                    24,
+                    buttonHeight,
                     page.label,
                     "",
                     widget -> switchPage(page),
@@ -166,199 +332,946 @@ public class HunterWildcardConfigScreen extends Screen {
             );
             button.active = true;
             addDrawableChild(button);
-            y += 30;
+            y += buttonHeight + buttonGap;
         }
     }
 
     private void buildGamePage(Layout layout) {
         int x = layout.contentX();
         int y = pageTop(layout);
-        int w = layout.contentWidth();
-        addBox(x, layout.contentY(), w, Math.min(118, layout.contentHeight()));
+        int w = layout.usableContentWidth();
 
         if (serverSync == null) {
-            addContentLabel(layout, "等待服务器同步。", x + 12, y + 14, 0xFFC9D4DE);
-            markContentBottom(layout, y + 40);
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "游戏状态");
+            card.hint("等待服务器同步。");
+            markContentBottom(layout, card.finish());
             return;
         }
 
-        addContentLabel(layout, "当前阶段: " + stateName(serverSync.gameState()), x + 12, y + 12, 0xFFFFFFFF);
-        addContentLabel(layout, "猎人: " + serverSync.hunterCount() + " 人", x + 12, y + 32, 0xFFC9D4DE);
-        addContentLabel(layout, "逃亡者: " + serverSync.runnerCount() + " 人", x + 12, y + 52, 0xFFC9D4DE);
-        addContentLabel(layout, "当前外卡: " + serverSync.activeWildcard(), x + 12, y + 72, 0xFFC9D4DE);
-        addContentLabel(layout, "你的权限: " + (serverSync.canManage() ? "OP" : "普通玩家"), x + 12, y + 92, serverSync.canManage() ? 0xFF77E287 : 0xFFFFC2C8);
+        String startTooltip = startGameTooltip(serverSync.gameState() == GameState.WAITING);
+        int currentY = addStatusPills(layout, x, y, w, List.of(
+                new StatusBlock("身份", serverSync.playerRole(), serverSync.playerInTeam() ? 0xFFFFFFFF : 0xFFFFD966),
+                new StatusBlock("权限", serverSync.canManage() ? "OP" : "普通", serverSync.canManage() ? 0xFF77E287 : 0xFFC9D4DE),
+                new StatusBlock("猎人", serverSync.hunterCount() + "人", serverSync.hunterCount() > 0 ? 0xFF77E287 : 0xFFFFD966),
+                new StatusBlock("逃亡者", serverSync.runnerCount() + "人", serverSync.runnerCount() > 0 ? 0xFF77E287 : 0xFFFFD966),
+                new StatusBlock("外卡", compactWildcardDisplayName(), serverSync.activeWildcardRunning() ? 0xFF7FC2FF : 0xFFC9D4DE)
+        ));
 
-        if (serverSync.canManage() && serverSync.gameState() == GameState.WAITING) {
-            addContentButton(layout, x, y + 134, 110, 28, "开始游戏", "", widget -> sendGameAction(GameAction.START_GAME), ButtonVariant.NORMAL, true);
-            markContentBottom(layout, y + 172);
-        } else {
-            markContentBottom(layout, y + 118);
-        }
+        currentY = addTwoColumnCards(
+                layout,
+                x,
+                currentY,
+                w,
+                MEDIUM_CARD_MAX_WIDTH,
+                "当前对局",
+                card -> {
+                    card.info("状态", serverSync.gameState() == GameState.WAITING ? "等待中" : "已开始", stateColor(serverSync.gameState()));
+                    card.info("我的队伍", serverSync.playerRole(), serverSync.playerInTeam() ? 0xFFFFFFFF : 0xFFFFD966);
+                    card.info("开始条件", startConditionDisplay(startTooltip), startTooltip.isBlank() ? 0xFF77E287 : 0xFFFFD966);
+                },
+                "外卡状态",
+                card -> {
+                    card.info("当前外卡", wildcardDisplayName(), serverSync.activeWildcardRunning() ? 0xFF7FC2FF : 0xFFC9D4DE);
+                    card.info("下次触发", formatSeconds(serverSync.nextWildcardSeconds()), 0xFF7FC2FF);
+                    card.info("运行剩余", formatSeconds(serverSync.activeWildcardRemainingSeconds()), serverSync.activeWildcardRunning() ? 0xFF7FC2FF : 0xFFC9D4DE);
+                }
+        );
+
+        boolean canStart = startTooltip.isBlank();
+        int buttonWidth = Math.min(240, Math.max(160, w - CARD_PADDING_X * 2));
+        int buttonX = x + Math.max(0, (w - buttonWidth) / 2);
+        addContentButton(
+                layout,
+                buttonX,
+                currentY,
+                buttonWidth,
+                BUTTON_HEIGHT,
+                "开始游戏",
+                startTooltip,
+                widget -> sendGameAction(GameAction.START_GAME),
+                ButtonVariant.PRIMARY,
+                canStart
+        );
+        markContentBottom(layout, currentY + BUTTON_HEIGHT + CARD_GAP);
     }
 
     private void buildTeamPage(Layout layout) {
         int x = layout.contentX();
         int y = pageTop(layout);
-        int w = layout.contentWidth();
-        addBox(x, layout.contentY(), w, Math.min(96, layout.contentHeight()));
+        int w = layout.usableContentWidth();
 
         if (serverSync == null) {
-            addContentLabel(layout, "等待服务器同步。", x + 12, y + 14, 0xFFC9D4DE);
-            markContentBottom(layout, y + 40);
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "队伍管理");
+            card.hint("等待服务器同步。");
+            markContentBottom(layout, card.finish());
             return;
         }
 
-        addContentLabel(layout, "我的队伍: " + serverSync.playerRole(), x + 12, y + 12, 0xFFFFFFFF);
-        addContentLabel(layout, "猎人: " + serverSync.hunterCount() + " 人", x + 12, y + 34, 0xFFC9D4DE);
-        addContentLabel(layout, "逃亡者: " + serverSync.runnerCount() + " 人", x + 12, y + 54, 0xFFC9D4DE);
-
-        int buttonY = y + 116;
-        int buttonWidth = Math.max(82, Math.min(112, (w - 18) / 3));
-        addContentButton(layout, x, buttonY, buttonWidth, 26, "加入猎人", "", widget -> sendTeamAction(TeamAction.JOIN_HUNTER), ButtonVariant.NORMAL, true);
-        addContentButton(layout, x + buttonWidth + 9, buttonY, buttonWidth, 26, "加入逃亡者", "", widget -> sendTeamAction(TeamAction.JOIN_RUNNER), ButtonVariant.NORMAL, true);
-        addContentButton(layout, x + (buttonWidth + 9) * 2, buttonY, buttonWidth, 26, "离开队伍", "", widget -> sendTeamAction(TeamAction.LEAVE), ButtonVariant.DANGER, serverSync.playerInTeam());
-        markContentBottom(layout, buttonY + 34);
+        markContentBottom(layout, addTeamManagementCard(layout, x, y, w));
     }
 
-    private void buildConfigPage(Layout layout) {
+    private void buildBasicPage(Layout layout) {
         int x = layout.contentX();
         int y = pageTop(layout);
-        int w = layout.contentWidth();
-        addBox(x, layout.contentY(), w, layout.contentHeight());
+        int w = layout.usableContentWidth();
 
         if (editableConfig == null) {
-            addContentLabel(layout, "等待配置同步。", x + 12, y + 14, 0xFFC9D4DE);
-            markContentBottom(layout, y + 40);
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "基础规则");
+            card.hint("等待配置同步。");
+            markContentBottom(layout, card.finish());
             return;
         }
 
-        addContentLabel(layout, canManage ? "配置模式: 可修改" : "配置模式: 只读", x + 12, y + 10, canManage ? 0xFF77E287 : 0xFFFFC2C8);
+        int bottom = addTwoColumnCards(
+                layout,
+                x,
+                y,
+                w,
+                "游戏流程",
+                card -> {
+                    card.number(NumberField.PREPARING_SECONDS);
+                    card.number(NumberField.ENDING_SECONDS);
+                },
+                "显示刷新",
+                card -> {
+                    card.number(NumberField.COMPASS_UPDATE_SECONDS);
+                    card.number(NumberField.ACTION_BAR_INTERVAL_SECONDS);
+                    card.hint("控制指南针和底部状态提示刷新节奏。");
+                }
+        );
+        CardBuilder boundaryCard = addCard(layout, x, bottom, w, "世界与边界");
+        boolean boundaryEnabled = editableConfig.hunterPrepareBoundaryEnabled();
+        boundaryCard.booleanField(BooleanField.HUNTER_PREPARE_BOUNDARY_ENABLED);
+        boundaryCard.number(NumberField.HUNTER_PREPARE_BOUNDARY_RADIUS, canManage && boundaryEnabled);
+        boundaryCard.number(NumberField.HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE, canManage && boundaryEnabled);
+        if (!boundaryEnabled) {
+            boundaryCard.hint("关闭时半径和警告距离不会生效。");
+        }
+        bottom = boundaryCard.finish() + CARD_GAP;
+        markContentBottom(layout, bottom);
+    }
 
-        int gap = 16;
-        int columnWidth = Math.max(180, (w - 24 - gap) / 2);
-        int leftX = x + 12;
-        int rightX = leftX + columnWidth + gap;
-        int rowY = y + 28;
-        int rowGap = Math.max(17, Math.min(20, (layout.contentHeight() - 66) / Math.max(1, NumberField.values().length)));
-        int fieldHeight = rowGap <= 18 ? 16 : 18;
+    private void buildVictoryPage(Layout layout) {
+        int x = layout.contentX();
+        int y = pageTop(layout);
+        int w = layout.usableContentWidth();
 
-        addContentLabel(layout, "时间配置", leftX, rowY, 0xFFFFFFFF, true);
-        int numberY = rowY + 18;
-        for (NumberField field : NumberField.values()) {
-            addContentNumberField(layout, field, leftX, numberY, columnWidth, fieldHeight);
-            numberY += rowGap;
+        if (editableConfig == null) {
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "胜利规则");
+            card.hint("等待配置同步。");
+            markContentBottom(layout, card.finish());
+            return;
         }
 
-        addContentLabel(layout, "外卡开关", rightX, rowY, 0xFFFFFFFF, true);
-        int toggleAreaWidth = Math.min(columnWidth, w - (rightX - x) - 12);
-        int toggleBottom = rowY + 18;
-        if (toggleAreaWidth >= 300) {
-            int toggleColumnGap = 8;
-            int toggleWidth = (toggleAreaWidth - toggleColumnGap) / 2;
-            int toggleY = rowY + 18;
-            ToggleField[] fields = ToggleField.values();
-            for (int i = 0; i < fields.length; i++) {
-                int column = i / 4;
-                int row = i % 4;
-                int fieldY = toggleY + row * 24;
-                addContentToggleField(layout, fields[i], rightX + column * (toggleWidth + toggleColumnGap), fieldY, toggleWidth, 20);
-                toggleBottom = Math.max(toggleBottom, fieldY + 20);
-            }
+        RunnerVictoryType victoryType = RunnerVictoryType.fromConfig(editableConfig.runnerVictoryType(), RunnerVictoryType.DRAGON);
+        HunterVictoryType hunterVictoryType = HunterVictoryType.fromConfig(editableConfig.hunterVictoryType(), HunterVictoryType.RUNNERS_OUT);
+        int bottom = addTwoColumnCards(
+                layout,
+                x,
+                y,
+                w,
+                360,
+                260,
+                "逃亡者胜利方式",
+                card -> buildRunnerVictoryCard(card, victoryType),
+                "猎人胜利方式",
+                card -> buildHunterVictoryCard(card, hunterVictoryType)
+        );
+        markContentBottom(layout, bottom);
+    }
+
+    private void buildRespawnPage(Layout layout) {
+        int x = layout.contentX();
+        int y = pageTop(layout);
+        int w = layout.usableContentWidth();
+
+        if (editableConfig == null) {
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "生命复活");
+            card.hint("等待配置同步。");
+            markContentBottom(layout, card.finish());
+            return;
+        }
+
+        RespawnMode hunterMode = RespawnMode.fromConfig(editableConfig.hunterRespawnMode(), RespawnMode.INFINITE);
+        boolean killCountMode = isHunterKillCountMode();
+        RespawnMode runnerMode = killCountMode ? RespawnMode.INFINITE : RespawnMode.fromConfig(editableConfig.runnerRespawnMode(), RespawnMode.LIMITED_LIVES);
+        int bottom = addTwoColumnCards(
+                layout,
+                x,
+                y,
+                w,
+                LARGE_CARD_MAX_WIDTH,
+                "猎人生命 / 复活",
+                card -> {
+                    card.dropdown(DropdownField.HUNTER_RESPAWN_MODE);
+                    card.number(NumberField.HUNTER_LIVES, canManage && hunterMode == RespawnMode.LIMITED_LIVES);
+                    card.number(NumberField.HUNTER_RESPAWN_SECONDS, canManage && hunterMode != RespawnMode.NO_RESPAWN);
+                    String hunterHint = respawnHint(hunterMode, "猎人");
+                    if (!hunterHint.isBlank()) {
+                        card.hint(hunterHint);
+                    }
+                },
+                "逃亡者生命 / 复活",
+                card -> {
+                    if (killCountMode) {
+                        card.info("逃亡者复活模式", "无限复活（锁定）", 0xFF7FC2FF);
+                        card.number(NumberField.RUNNER_LIVES, false);
+                        card.number(NumberField.RUNNER_RESPAWN_SECONDS, canManage);
+                        card.hint("击杀数模式下逃亡者固定无限复活。");
+                    } else {
+                        card.dropdown(DropdownField.RUNNER_RESPAWN_MODE);
+                        card.number(NumberField.RUNNER_LIVES, canManage && runnerMode == RespawnMode.LIMITED_LIVES);
+                        card.number(NumberField.RUNNER_RESPAWN_SECONDS, canManage && runnerMode != RespawnMode.NO_RESPAWN);
+                        String runnerHint = respawnHint(runnerMode, "逃亡者");
+                        if (!runnerHint.isBlank()) {
+                            card.hint(runnerHint);
+                        }
+                    }
+                }
+        );
+        markContentBottom(layout, bottom);
+    }
+
+    private void buildWildcardPage(Layout layout) {
+        int x = layout.contentX();
+        int y = pageTop(layout);
+        int w = layout.usableContentWidth();
+
+        if (editableConfig == null) {
+            CardBuilder card = addCard(layout, x, layout.contentY(), w, "外卡规则");
+            card.hint("等待配置同步。");
+            markContentBottom(layout, card.finish());
+            return;
+        }
+
+        int bottom = addTwoColumnCards(
+                layout,
+                x,
+                y,
+                w,
+                MEDIUM_CARD_MAX_WIDTH,
+                "外卡总设置",
+                card -> {
+                    card.numberPair(NumberField.WILDCARD_INTERVAL_SECONDS, NumberField.WILDCARD_DURATION_SECONDS);
+                    card.info("已启用外卡", enabledWildcardCount(editableConfig) + " / " + ToggleField.values().length, enabledWildcardCount(editableConfig) > 0 ? 0xFF77E287 : 0xFFC9D4DE);
+                },
+                "外卡触发状态",
+                card -> {
+                    if (serverSync == null) {
+                        card.hint("等待服务器同步。");
+                    } else {
+                        card.info("当前外卡", wildcardDisplayName(), serverSync.activeWildcardRunning() ? 0xFF7FC2FF : 0xFFC9D4DE);
+                        card.info("下一次触发", formatSeconds(serverSync.nextWildcardSeconds()), 0xFFC9D4DE);
+                        card.info("运行剩余", formatSeconds(serverSync.activeWildcardRemainingSeconds()), serverSync.activeWildcardRunning() ? 0xFF7FC2FF : 0xFFC9D4DE);
+                    }
+                }
+        );
+        if (selectedWildcardSettings != null && hasWildcardSettings(selectedWildcardSettings)) {
+            bottom = addWildcardSettingsCard(layout, x, bottom, w, selectedWildcardSettings);
         } else {
-            int toggleHeight = 16;
-            int toggleGap = Math.max(17, Math.min(19, (layout.contentHeight() - 66) / Math.max(1, ToggleField.values().length)));
-            int toggleY = rowY + 18;
-            for (ToggleField field : ToggleField.values()) {
-                addContentToggleField(layout, field, rightX, toggleY, toggleAreaWidth, toggleHeight);
-                toggleBottom = toggleY + toggleHeight;
-                toggleY += toggleGap;
+            selectedWildcardSettings = null;
+            bottom = addWildcardToggleMatrixCard(layout, x, bottom, w);
+        }
+        markContentBottom(layout, bottom);
+    }
+
+    private void buildRunnerVictoryCard(CardBuilder card, RunnerVictoryType victoryType) {
+        card.dropdown(DropdownField.RUNNER_VICTORY_TYPE);
+        switch (victoryType) {
+            case DRAGON -> card.hint("当前目标：击败末影龙。");
+            case SURVIVE_TIME -> card.number(NumberField.SURVIVE_TIME_SECONDS);
+            case REACH_LOCATION -> {
+                card.dropdown(DropdownField.TARGET_DIMENSION);
+                card.coordinates(NumberField.TARGET_X, NumberField.TARGET_Y, NumberField.TARGET_Z);
+                card.number(NumberField.TARGET_RADIUS);
+            }
+            case COLLECT_ITEM -> {
+                card.string(StringField.TARGET_ITEM_ID);
+                card.number(NumberField.TARGET_ITEM_COUNT);
             }
         }
-        markContentBottom(layout, Math.max(numberY, toggleBottom) + 12);
+    }
+
+    private void buildHunterVictoryCard(CardBuilder card, HunterVictoryType hunterVictoryType) {
+        card.dropdown(DropdownField.HUNTER_VICTORY_TYPE);
+        if (hunterVictoryType == HunterVictoryType.RUNNER_KILL_COUNT) {
+            card.number(NumberField.HUNTER_RUNNER_KILL_TARGET);
+            card.hint("逃亡者会锁定为无限复活。");
+        } else {
+            card.dropdown(DropdownField.RUNNER_TEAM_LOSS_MODE);
+        }
+    }
+
+    private String respawnHint(RespawnMode mode, String roleName) {
+        return switch (mode) {
+            case INFINITE -> roleName + "无限复活时生命数无效。";
+            case NO_RESPAWN -> roleName + "不复活时生命数和复活时间无效。";
+            case LIMITED_LIVES -> "";
+        };
     }
 
     private void buildDebugPage(Layout layout) {
         int x = layout.contentX();
         int y = pageTop(layout);
-        int w = layout.contentWidth();
-        addBox(x, layout.contentY(), w, layout.contentHeight());
+        int w = layout.usableContentWidth();
 
-        if (!isDebugPageEnabled()) {
-            addContentLabel(layout, "调试页未开启。", x + 12, y + 14, 0xFFFFC2C8);
-            markContentBottom(layout, y + 40);
-            return;
-        }
+        CardBuilder actionCard = addCard(layout, x, y, w, "对局控制");
+        actionCard.hint(canManage ? "这些操作会发送到服务端执行。" : "只有 OP 可以执行调试操作。");
+        actionCard.buttonGrid(List.of(
+                new ButtonSpec("停止游戏", widget -> sendDebugAction(DebugAction.STOP_GAME), ButtonVariant.DANGER, canManage && isGameActive(), "结束当前对局并进入结算流程。"),
+                new ButtonSpec("随机外卡", widget -> sendDebugAction(DebugAction.ROLL_WILDCARD), ButtonVariant.NORMAL, canManage && serverSync != null && serverSync.gameState() == GameState.RUNNING, "立即按服务端规则抽取一个可用外卡。"),
+                new ButtonSpec("停止外卡", widget -> sendDebugAction(DebugAction.STOP_WILDCARD), ButtonVariant.DANGER, canManage && serverSync != null && serverSync.activeWildcardRunning(), "强制结束当前正在运行的外卡。")
+        ), w >= 900 ? 3 : 2, 150);
+        int currentY = actionCard.finish() + CARD_GAP;
 
-        addContentLabel(layout, "调试操作", x + 12, y + 12, 0xFFFFFFFF, true);
-        addContentLabel(layout, canManage ? "这些操作会发送到服务端执行。" : "只有 OP 可以执行调试操作。", x + 12, y + 32, canManage ? 0xFFC9D4DE : 0xFFFFC2C8);
-
-        int buttonY = y + 58;
-        int buttonWidth = Math.max(100, Math.min(136, (w - 36) / 2));
-        addContentButton(layout, x + 12, buttonY, buttonWidth, 28, "开始游戏", "", widget -> sendDebugAction(DebugAction.START_GAME), ButtonVariant.NORMAL, canManage && serverSync != null && serverSync.gameState() == GameState.WAITING);
-        addContentButton(layout, x + 24 + buttonWidth, buttonY, buttonWidth, 28, "停止游戏", "", widget -> sendDebugAction(DebugAction.STOP_GAME), ButtonVariant.DANGER, canManage && isGameActive());
-        addContentButton(layout, x + 12, buttonY + 36, buttonWidth, 28, "随机外卡", "", widget -> sendDebugAction(DebugAction.ROLL_WILDCARD), ButtonVariant.NORMAL, canManage && serverSync != null && serverSync.gameState() == GameState.RUNNING);
-        addContentButton(layout, x + 24 + buttonWidth, buttonY + 36, buttonWidth, 28, "停止外卡", "", widget -> sendDebugAction(DebugAction.STOP_WILDCARD), ButtonVariant.DANGER, canManage && serverSync != null && serverSync.activeWildcardRunning());
-
-        int testTitleY = buttonY + 84;
-        addContentLabel(layout, "单独测试外卡", x + 12, testTitleY, 0xFFFFFFFF, true);
-        int columns = w >= 360 ? 2 : 1;
-        int testGap = 10;
-        int testButtonWidth = Math.max(110, (w - 24 - (columns - 1) * testGap) / columns);
-        int testButtonY = testTitleY + 18;
-        ToggleField[] fields = ToggleField.values();
-        int testBottom = testButtonY;
-        for (int i = 0; i < fields.length; i++) {
-            ToggleField field = fields[i];
-            int column = i % columns;
-            int row = i / columns;
-            int fieldX = x + 12 + column * (testButtonWidth + testGap);
-            int fieldY = testButtonY + row * 32;
+        CardBuilder testCard = addCard(layout, x, currentY, w, "单独测试外卡");
+        List<ButtonSpec> testButtons = new ArrayList<>();
+        for (ToggleField field : ToggleField.values()) {
             boolean enabled = editableConfig != null && getToggle(editableConfig, field);
-            addContentButton(
-                    layout,
-                    fieldX,
-                    fieldY,
-                    testButtonWidth,
-                    26,
+            testButtons.add(new ButtonSpec(
                     enabled ? "测试 " + field.label : field.label + " 已关闭",
-                    "",
                     widget -> sendTestWildcard(field),
                     ButtonVariant.NORMAL,
-                    canManage && enabled
-            );
-            testBottom = Math.max(testBottom, fieldY + 26);
+                    canManage && enabled,
+                    enabled ? "单独触发该外卡用于测试。" : "该外卡当前关闭，不能测试。"
+            ));
         }
-        markContentBottom(layout, testBottom + 12);
+        testCard.buttonGrid(testButtons, w >= 900 ? 3 : 2, 150);
+        markContentBottom(layout, testCard.finish());
     }
 
     private void buildFooter(Layout layout) {
         int y = layout.panelY() + layout.panelHeight() - 32;
-        if (currentPage == Page.CONFIG) {
-            int buttonWidth = Math.max(76, Math.min(108, (layout.contentWidth() - 16) / 3));
-            int x = layout.contentX() + Math.max(0, layout.contentWidth() - (buttonWidth * 3 + 16));
-            addButton(x, y, buttonWidth, 24, "保存配置", "", widget -> saveConfig(), ButtonVariant.NORMAL, canManage && editableConfig != null);
-            addButton(x + buttonWidth + 8, y, buttonWidth, 24, "重新加载", "", widget -> reloadConfig(), ButtonVariant.NORMAL, canManage);
+        if (isConfigEditPage()) {
+            int buttonWidth = Math.max(76, Math.min(108, (layout.usableContentWidth() - 16) / 3));
+            int x = layout.contentX() + Math.max(0, layout.usableContentWidth() - (buttonWidth * 3 + 16));
+            saveButton = addButton(x, y, buttonWidth, 24, "保存配置", "只有存在未保存配置时才能提交。", widget -> saveConfig(), ButtonVariant.PRIMARY, canSaveConfig());
+            addButton(x + buttonWidth + 8, y, buttonWidth, 24, "恢复默认", "将当前页面配置恢复为默认值，保存后生效。", widget -> restoreDefaultConfig(), ButtonVariant.NORMAL, canManage && editableConfig != null);
             addButton(x + (buttonWidth + 8) * 2, y, buttonWidth, 24, "关闭", "", widget -> close(), ButtonVariant.NORMAL, true);
             return;
         }
 
-        addButton(layout.contentX() + layout.contentWidth() - 86, y, 86, 24, "关闭", "", widget -> close(), ButtonVariant.NORMAL, true);
+        addButton(layout.contentX() + layout.usableContentWidth() - 86, y, 86, 24, "关闭", "", widget -> close(), ButtonVariant.NORMAL, true);
+    }
+
+    private CardBuilder addCard(Layout layout, int x, int y, int width, String title) {
+        return new CardBuilder(layout, x, y, width, title);
+    }
+
+    private int addTwoColumnCards(
+            Layout layout,
+            int x,
+            int y,
+            int width,
+            String leftTitle,
+            CardBody leftBody,
+            String rightTitle,
+            CardBody rightBody
+    ) {
+        return addTwoColumnCards(layout, x, y, width, MEDIUM_CARD_MAX_WIDTH, leftTitle, leftBody, rightTitle, rightBody);
+    }
+
+    private int addTwoColumnCards(
+            Layout layout,
+            int x,
+            int y,
+            int width,
+            int maxCardWidth,
+            String leftTitle,
+            CardBody leftBody,
+            String rightTitle,
+            CardBody rightBody
+    ) {
+        return addTwoColumnCards(layout, x, y, width, maxCardWidth, maxCardWidth, leftTitle, leftBody, rightTitle, rightBody);
+    }
+
+    private int addTwoColumnCards(
+            Layout layout,
+            int x,
+            int y,
+            int width,
+            int leftMaxWidth,
+            int rightMaxWidth,
+            String leftTitle,
+            CardBody leftBody,
+            String rightTitle,
+            CardBody rightBody
+    ) {
+        if (useTwoColumns(width)) {
+            int availableWidth = width - TWO_COLUMN_GAP;
+            int minColumnWidth = Math.min(150, Math.max(100, availableWidth / 2));
+            int totalMaxWidth = Math.max(1, leftMaxWidth + rightMaxWidth);
+            int leftWidth = Math.min(leftMaxWidth, Math.max(minColumnWidth, availableWidth * leftMaxWidth / totalMaxWidth));
+            int rightWidth = Math.min(rightMaxWidth, availableWidth - leftWidth);
+            if (rightWidth < minColumnWidth) {
+                rightWidth = minColumnWidth;
+                leftWidth = availableWidth - rightWidth;
+            }
+            if (leftWidth < minColumnWidth) {
+                leftWidth = minColumnWidth;
+                rightWidth = availableWidth - leftWidth;
+            }
+
+            int extraWidth = Math.max(0, availableWidth - leftWidth - rightWidth);
+            int addLeft = Math.min(extraWidth, Math.max(0, leftMaxWidth - leftWidth));
+            leftWidth += addLeft;
+            extraWidth -= addLeft;
+            rightWidth += Math.min(extraWidth, Math.max(0, rightMaxWidth - rightWidth));
+
+            int rowWidth = leftWidth + rightWidth + TWO_COLUMN_GAP;
+            int rowX = x + Math.max(0, (width - rowWidth) / 2);
+            CardBuilder leftCard = addCard(layout, rowX, y, leftWidth, leftTitle);
+            leftBody.build(leftCard);
+            CardBuilder rightCard = addCard(layout, rowX + leftWidth + TWO_COLUMN_GAP, y, rightWidth, rightTitle);
+            rightBody.build(rightCard);
+            int leftBottom = leftCard.finish();
+            int rightBottom = rightCard.finish();
+            return Math.max(leftBottom, rightBottom) + CARD_GAP;
+        }
+
+        int cardWidth = Math.min(width, Math.max(leftMaxWidth, rightMaxWidth));
+        int cardX = x + Math.max(0, (width - cardWidth) / 2);
+        CardBuilder leftCard = addCard(layout, cardX, y, cardWidth, leftTitle);
+        leftBody.build(leftCard);
+        int nextY = leftCard.finish() + CARD_GAP;
+        CardBuilder rightCard = addCard(layout, cardX, nextY, cardWidth, rightTitle);
+        rightBody.build(rightCard);
+        return rightCard.finish() + CARD_GAP;
+    }
+
+    private int addWildcardToggleMatrixCard(Layout layout, int x, int y, int width) {
+        int columns = wildcardToggleColumns(width);
+        int gap = 8;
+        int targetGridWidth = columns * WILDCARD_TOGGLE_TARGET_WIDTH + (columns - 1) * gap;
+        int cardWidth = Math.min(width, targetGridWidth + CARD_PADDING_X * 2);
+        int cardX = x + Math.max(0, (width - cardWidth) / 2);
+        CardBuilder matrixCard = addCard(layout, cardX, y, cardWidth, "外卡开关矩阵");
+        matrixCard.toggleGrid(ToggleField.values(), columns);
+        return matrixCard.finish() + CARD_GAP;
+    }
+
+    private int addWildcardSettingsCard(Layout layout, int x, int y, int width, ToggleField field) {
+        int cardWidth = Math.min(width, SMALL_CARD_MAX_WIDTH);
+        int cardX = x + Math.max(0, (width - cardWidth) / 2);
+        CardBuilder card = addCard(layout, cardX, y, cardWidth, field.label + "设置");
+        boolean enabled = getToggle(editableConfig, field);
+        card.info("外卡状态", enabled ? "开启" : "关闭", enabled ? 0xFF77E287 : 0xFFC9D4DE);
+        switch (field) {
+            case HUNTER_RADAR -> {
+                card.number(NumberField.HUNTER_RADAR_INTERVAL_SECONDS, canManage);
+                card.hint("猎人雷达会按该间隔播报逃亡者方位。");
+            }
+            case SUPPLY_DROP -> {
+                card.number(NumberField.SUPPLY_DROP_INTERVAL_SECONDS, canManage);
+                card.hint("补给空投会按该间隔生成补给。");
+            }
+            default -> card.hint("该外卡当前没有单独参数。");
+        }
+        card.button("返回外卡矩阵", widget -> closeWildcardSettings(), ButtonVariant.NORMAL, true, 132);
+        return card.finish() + CARD_GAP;
+    }
+
+    private int addStatusBlocks(Layout layout, int x, int y, int width, List<StatusBlock> blocks) {
+        int gap = 12;
+        int columns;
+        if (width >= 430) {
+            columns = 3;
+        } else if (width >= 300) {
+            columns = 2;
+        } else {
+            columns = 1;
+        }
+        columns = Math.max(1, Math.min(columns, blocks.size()));
+
+        int blockHeight = 48;
+        int blockWidth = Math.min(STATUS_BLOCK_MAX_WIDTH, Math.max(80, (width - (columns - 1) * gap) / columns));
+        int gridWidth = blockWidth * columns + (columns - 1) * gap;
+        int gridX = x + Math.max(0, (width - gridWidth) / 2);
+        for (int i = 0; i < blocks.size(); i++) {
+            int column = i % columns;
+            int row = i / columns;
+            addStatusBlock(layout, gridX + column * (blockWidth + gap), y + row * (blockHeight + gap), blockWidth, blockHeight, blocks.get(i));
+        }
+
+        int rows = (blocks.size() + columns - 1) / columns;
+        return y + rows * blockHeight + (rows - 1) * gap + CARD_GAP;
+    }
+
+    private void addStatusBlock(Layout layout, int x, int y, int width, int height, StatusBlock block) {
+        if (isVisibleInContentPartial(layout, y, height)) {
+            boxes.add(new Box(x, y, width, height, 0x77303A46, block.color()));
+        }
+        if (isVisibleInContent(layout, y + 9, textRenderer.fontHeight)) {
+            labels.add(new Label(block.label(), x + 8, y + 7, 0xFF9FAAB4, false, Math.max(20, width - 16)));
+        }
+        if (isVisibleInContent(layout, y + 27, textRenderer.fontHeight)) {
+            labels.add(new Label(block.value(), x + 8, y + 27, block.color(), true, Math.max(20, width - 16)));
+        }
+    }
+
+    private int addStatusPills(Layout layout, int x, int y, int width, List<StatusBlock> blocks) {
+        int gap = 8;
+        int rowGap = 7;
+        int pillHeight = 28;
+        List<Integer> pillWidths = new ArrayList<>();
+        for (StatusBlock block : blocks) {
+            int textWidth = textRenderer.getWidth(block.label() + "：" + block.value());
+            pillWidths.add(Math.min(190, Math.max(88, textWidth + 24)));
+        }
+        int totalWidth = pillWidths.stream().mapToInt(Integer::intValue).sum() + gap * Math.max(0, blocks.size() - 1);
+        if (blocks.size() == 5 && totalWidth > width) {
+            int compactWidth = Math.max(72, (width - gap * 4) / 5);
+            for (int i = 0; i < pillWidths.size(); i++) {
+                pillWidths.set(i, compactWidth);
+            }
+        }
+
+        int index = 0;
+        int rowY = y;
+        while (index < blocks.size()) {
+            int rowStart = index;
+            int rowWidth = 0;
+            while (index < blocks.size()) {
+                int nextWidth = pillWidths.get(index);
+                int candidateWidth = rowWidth == 0 ? nextWidth : rowWidth + gap + nextWidth;
+                if (candidateWidth > width && index > rowStart) {
+                    break;
+                }
+
+                rowWidth = candidateWidth;
+                index++;
+            }
+
+            int pillX = x + Math.max(0, (width - rowWidth) / 2);
+            for (int i = rowStart; i < index; i++) {
+                StatusBlock block = blocks.get(i);
+                int pillWidth = pillWidths.get(i);
+                addStatusPill(layout, pillX, rowY, pillWidth, pillHeight, block);
+                pillX += pillWidth + gap;
+            }
+
+            rowY += pillHeight + rowGap;
+        }
+
+        return rowY - rowGap + CARD_GAP;
+    }
+
+    private void addStatusPill(Layout layout, int x, int y, int width, int height, StatusBlock block) {
+        if (isVisibleInContentPartial(layout, y, height)) {
+            boxes.add(new Box(x, y, width, height, 0x66303A46, block.color()));
+        }
+
+        String label = block.label() + "：";
+        int labelWidth = Math.min(textRenderer.getWidth(label), Math.max(20, width / 2));
+        int textY = y + Math.max(4, (height - textRenderer.fontHeight) / 2);
+        if (isVisibleInContent(layout, y, height)) {
+            labels.add(new Label(label, x + 8, textY, 0xFF9FAAB4, false, labelWidth));
+            labels.add(new Label(block.value(), x + 8 + labelWidth, textY, block.color(), true, Math.max(20, width - labelWidth - 14)));
+        }
+    }
+
+    private int addTeamManagementCard(Layout layout, int x, int y, int width) {
+        boolean twoColumns = width >= TWO_COLUMN_MIN_WIDTH;
+        int sectionGap = TWO_COLUMN_GAP;
+        int availableSectionWidth = twoColumns ? (width - CARD_PADDING_X * 2 - sectionGap) / 2 : width - CARD_PADDING_X * 2;
+        int sectionWidth = Math.min(twoColumns ? SMALL_CARD_MAX_WIDTH : MEDIUM_CARD_MAX_WIDTH, Math.max(80, availableSectionWidth));
+        int sectionsWidth = twoColumns ? sectionWidth * 2 + sectionGap : sectionWidth;
+        int cardWidth = Math.min(width, sectionsWidth + CARD_PADDING_X * 2);
+        int cardX = x + Math.max(0, (width - cardWidth) / 2);
+        int contentX = cardX + CARD_PADDING_X;
+        int contentWidth = Math.max(80, cardWidth - CARD_PADDING_X * 2);
+        int sectionsX = contentX + Math.max(0, (contentWidth - sectionsWidth) / 2);
+        int sectionHeight = 60;
+        int sectionY = y + CARD_PADDING_TOP + CARD_TITLE_HEIGHT + 4;
+        int secondSectionY = twoColumns ? sectionY : sectionY + sectionHeight + sectionGap;
+        int sectionsBottom = twoColumns ? sectionY + sectionHeight : secondSectionY + sectionHeight;
+        int bottomRowY = sectionsBottom + 6;
+        int cardHeight = bottomRowY + BUTTON_HEIGHT + CARD_PADDING_BOTTOM - y;
+
+        drawCardBackground(layout, cardX, y, cardWidth, cardHeight);
+        addCardTitle(layout, "队伍管理", contentX, y + CARD_PADDING_TOP);
+
+        boolean isHunter = "猎人".equals(serverSync.playerRole());
+        boolean isRunner = "逃亡者".equals(serverSync.playerRole());
+        addTeamSection(
+                layout,
+                sectionsX,
+                sectionY,
+                sectionWidth,
+                sectionHeight,
+                "猎人阵营",
+                serverSync.hunterCount(),
+                isHunter,
+                0xFFD76474,
+                isHunter ? "已是猎人" : "加入猎人",
+                isHunter ? "你已经在猎人阵营。" : "加入猎人阵营。",
+                widget -> sendTeamAction(TeamAction.JOIN_HUNTER),
+                !isHunter
+        );
+        addTeamSection(
+                layout,
+                twoColumns ? sectionsX + sectionWidth + sectionGap : sectionsX,
+                secondSectionY,
+                sectionWidth,
+                sectionHeight,
+                "逃亡者阵营",
+                serverSync.runnerCount(),
+                isRunner,
+                0xFF7FC2FF,
+                isRunner ? "已是逃亡者" : "加入逃亡者",
+                isRunner ? "你已经在逃亡者阵营。" : "加入逃亡者阵营。",
+                widget -> sendTeamAction(TeamAction.JOIN_RUNNER),
+                !isRunner
+        );
+
+        int leaveWidth = Math.min(260, Math.max(104, contentWidth / 4));
+        int teamLabelWidth = Math.max(40, contentWidth - leaveWidth - BUTTON_GAP);
+        if (isVisibleInContent(layout, bottomRowY, BUTTON_HEIGHT)) {
+            labels.add(new Label("我的当前队伍：" + serverSync.playerRole(), contentX, bottomRowY + 6, 0xFFC9D4DE, false, teamLabelWidth));
+        }
+        addContentButton(
+                layout,
+                contentX + contentWidth - leaveWidth,
+                bottomRowY,
+                leaveWidth,
+                BUTTON_HEIGHT,
+                "离开队伍",
+                serverSync.playerInTeam() ? "退出当前阵营。" : "你尚未加入队伍。",
+                widget -> sendTeamAction(TeamAction.LEAVE),
+                ButtonVariant.DANGER,
+                serverSync.playerInTeam()
+        );
+        return y + cardHeight + CARD_GAP;
+    }
+
+    private void addTeamSection(
+            Layout layout,
+            int x,
+            int y,
+            int width,
+            int height,
+            String title,
+            int count,
+            boolean current,
+            int accent,
+            String buttonTitle,
+            String tooltip,
+            ButtonWidget.PressAction action,
+            boolean enabled
+    ) {
+        if (isVisibleInContentPartial(layout, y, height)) {
+            boxes.add(new Box(x, y, width, height, 0x55303A46, 0xFF4C5A66));
+            boxes.add(new Box(x, y, 3, height, accent, accent));
+        }
+        int buttonWidth = Math.min(96, Math.max(78, width / 3));
+        int textWidth = Math.max(40, width - buttonWidth - 24);
+        addContentLabel(layout, title, x + 10, y + 9, accent, true);
+        if (isVisibleInContent(layout, y + 9, textRenderer.fontHeight)) {
+            labels.add(new Label(current ? "当前阵营" : "可加入", x + Math.max(66, textRenderer.getWidth(title) + 18), y + 9, current ? 0xFF77E287 : 0xFF9FAAB4, false, Math.max(40, textWidth - 62)));
+        }
+        addContentLabel(layout, "当前人数：" + count + " 人", x + 10, y + 29, 0xFFC9D4DE, false);
+        addContentButton(layout, x + width - buttonWidth - 8, y + height - BUTTON_HEIGHT - 7, buttonWidth, BUTTON_HEIGHT, buttonTitle, tooltip, action, ButtonVariant.NORMAL, enabled);
+    }
+
+    private void addWildcardToggleTile(Layout layout, ToggleField field, int x, int y, int width, int height) {
+        boolean enabled = getToggle(editableConfig, field);
+        boolean configurable = hasWildcardSettings(field);
+        int borderColor = enabled ? 0xFF55B978 : 0xFF59636C;
+        if (isVisibleInContentPartial(layout, y, height)) {
+            boxes.add(new Box(x, y, width, height, enabled ? 0x55324B3F : 0x55303A46, borderColor));
+        }
+
+        int toggleWidth = Math.min(34, Math.max(30, width / 5));
+        int settingsWidth = configurable ? 42 : 0;
+        int settingsGap = configurable ? 4 : 0;
+        int buttonsWidth = toggleWidth + settingsWidth + settingsGap;
+        int textWidth = Math.max(20, width - buttonsWidth - 18);
+        int labelY = y + Math.max(4, (height - textRenderer.fontHeight) / 2);
+        if (isVisibleInContent(layout, y, height)) {
+            labels.add(new Label(field.label, x + 7, labelY, enabled ? 0xFFFFFFFF : 0xFFC9D4DE, false, textWidth));
+        }
+        if (configurable) {
+            addContentButton(
+                    layout,
+                    x + width - buttonsWidth - 5,
+                    y + Math.max(4, (height - 18) / 2),
+                    settingsWidth,
+                    18,
+                    "设置",
+                    "",
+                    widget -> openWildcardSettings(field),
+                    ButtonVariant.NORMAL,
+                    true
+            );
+        }
+        addContentButton(
+                layout,
+                x + width - toggleWidth - 5,
+                y + Math.max(4, (height - 18) / 2),
+                toggleWidth,
+                18,
+                enabled ? "开" : "关",
+                "",
+                widget -> toggleField(field),
+                enabled ? ButtonVariant.TOGGLE_ON : ButtonVariant.TOGGLE_OFF,
+                canManage
+        );
+    }
+
+    private boolean useTwoColumns(int usableContentWidth) {
+        return usableContentWidth >= TWO_COLUMN_MIN_WIDTH;
+    }
+
+    private void drawCardBackground(Layout layout, int x, int y, int width, int height) {
+        if (isVisibleInContentPartial(layout, y, height)) {
+            boxes.add(new Box(x, y, width, height, 0x88303A46, 0xFF4C5A66));
+        }
+    }
+
+    private void drawCardBorder(Layout layout, int x, int y, int width, int height) {
+        drawCardBackground(layout, x, y, width, height);
+    }
+
+    private void addCardTitle(Layout layout, String title, int x, int y) {
+        addContentLabel(layout, title, x, y, 0xFFFFFFFF, true);
+    }
+
+    private void addHintText(Layout layout, String text, int x, int y, int width) {
+        if (isVisibleInContent(layout, y, textRenderer.fontHeight)) {
+            labels.add(new Label(text, x, y, 0xFF9FAAB4, false, width));
+        }
+    }
+
+    private int addInfoRow(Layout layout, String label, String value, int x, int y, int width, int valueColor) {
+        int valueX = x + Math.max(92, Math.min(LABEL_WIDTH, width / 2));
+        int labelY = y + Math.max(3, (ROW_HEIGHT - textRenderer.fontHeight) / 2);
+        addContentLabel(layout, label + "：", x, labelY, 0xFFC9D4DE, false);
+        if (isVisibleInContent(layout, y, textRenderer.fontHeight)) {
+            labels.add(new Label(value, valueX, labelY, valueColor, false, Math.max(40, width - (valueX - x))));
+        }
+        return nextRowY(y);
+    }
+
+    private int addInputRow(Layout layout, NumberField field, int x, int y, int width) {
+        return addInputRow(layout, field, x, y, width, canManage);
+    }
+
+    private int addInputRow(Layout layout, NumberField field, int x, int y, int width, boolean editable) {
+        addContentNumberField(layout, field, x, y, width, CONTROL_HEIGHT, editable);
+        return nextRowY(y);
+    }
+
+    private int addInputRow(Layout layout, StringField field, int x, int y, int width) {
+        addContentStringField(layout, field, x, y, width, CONTROL_HEIGHT);
+        return nextRowY(y);
+    }
+
+    private int addCoordinateRow(Layout layout, NumberField xField, NumberField yField, NumberField zField, int x, int y, int width) {
+        if (!isVisibleInContent(layout, y, ROW_HEIGHT)) {
+            return nextRowY(y);
+        }
+
+        int labelWidth = width < 230 ? 32 : 52;
+        int axisWidth = 8;
+        int gap = 4;
+        int availableWidth = width - labelWidth - axisWidth * 3 - gap * 5;
+        int fieldWidth = Math.max(28, availableWidth / 3);
+        int rowWidth = labelWidth + (axisWidth + fieldWidth) * 3 + gap * 5;
+        if (rowWidth > width) {
+            fieldWidth = Math.max(24, (width - labelWidth - axisWidth * 3 - gap * 5) / 3);
+            rowWidth = labelWidth + (axisWidth + fieldWidth) * 3 + gap * 5;
+        }
+
+        int startX = x + Math.max(0, (width - rowWidth) / 2);
+        int labelY = y + Math.max(3, (ROW_HEIGHT - textRenderer.fontHeight) / 2);
+        labels.add(new Label(width < 230 ? "坐标：" : "目标坐标：", startX, labelY, 0xFFC9D4DE, false, labelWidth));
+
+        int currentX = startX + labelWidth + gap;
+        currentX = addCoordinateInput(layout, "X", xField, currentX, controlY(y), axisWidth, fieldWidth, CONTROL_HEIGHT);
+        currentX = addCoordinateInput(layout, "Y", yField, currentX + gap, controlY(y), axisWidth, fieldWidth, CONTROL_HEIGHT);
+        addCoordinateInput(layout, "Z", zField, currentX + gap, controlY(y), axisWidth, fieldWidth, CONTROL_HEIGHT);
+        return nextRowY(y);
+    }
+
+    private int addDropdownRow(Layout layout, DropdownField field, int x, int y, int width) {
+        return addDropdownRow(layout, field, x, y, width, canManage);
+    }
+
+    private int addDropdownRow(Layout layout, DropdownField field, int x, int y, int width, boolean editable) {
+        int dropdownWidth = dropdownWidth(width);
+        int dropdownX = x + width - dropdownWidth;
+        int labelY = y + Math.max(3, (ROW_HEIGHT - textRenderer.fontHeight) / 2);
+        labels.add(new Label(field.label + "：", x, labelY, 0xFFC9D4DE, false, Math.max(10, dropdownX - x - 8)));
+        addContentDropdownField(layout, field, dropdownX, controlY(y), dropdownWidth, CONTROL_HEIGHT, editable);
+        return nextRowY(y);
+    }
+
+    private int addToggleRow(Layout layout, BooleanField field, int x, int y, int width) {
+        addContentBooleanField(layout, field, x, y, width, BUTTON_HEIGHT);
+        return nextRowY(y);
+    }
+
+    private int addButtonRow(Layout layout, List<ButtonSpec> buttons, int x, int y, int width, int requestedColumns, int maxButtonWidth) {
+        if (buttons.isEmpty()) {
+            return y;
+        }
+
+        int columns = Math.max(1, Math.min(requestedColumns, buttons.size()));
+        int availableButtonWidth = Math.max(80, (width - (columns - 1) * BUTTON_GAP) / columns);
+        int buttonWidth = maxButtonWidth <= 0 ? availableButtonWidth : Math.min(maxButtonWidth, availableButtonWidth);
+        int rowWidth = buttonWidth * columns + (columns - 1) * BUTTON_GAP;
+        int startX = x + Math.max(0, (width - rowWidth) / 2);
+        int rows = (buttons.size() + columns - 1) / columns;
+        for (int i = 0; i < buttons.size(); i++) {
+            ButtonSpec button = buttons.get(i);
+            int column = i % columns;
+            int row = i / columns;
+            addContentButton(
+                    layout,
+                    startX + column * (buttonWidth + BUTTON_GAP),
+                    y + row * (BUTTON_HEIGHT + BUTTON_GAP),
+                    buttonWidth,
+                    BUTTON_HEIGHT,
+                    button.title(),
+                    button.tooltip(),
+                    button.action(),
+                    button.variant(),
+                    button.enabled()
+            );
+        }
+        return y + rows * BUTTON_HEIGHT + (rows - 1) * BUTTON_GAP + ROW_GAP;
+    }
+
+    private int nextRowY(int y) {
+        return y + ROW_HEIGHT + ROW_GAP;
+    }
+
+    private int controlY(int rowY) {
+        return rowY + Math.max(0, (ROW_HEIGHT - CONTROL_HEIGHT) / 2);
+    }
+
+    private int buttonY(int rowY) {
+        return rowY + Math.max(0, (ROW_HEIGHT - BUTTON_HEIGHT) / 2);
+    }
+
+    private int rowContentBottom(int y) {
+        return y + Math.max(Math.max(ROW_HEIGHT, CONTROL_HEIGHT), BUTTON_HEIGHT);
+    }
+
+    private int contentStartY(int cardY) {
+        return cardY + CARD_PADDING_TOP + CARD_TITLE_HEIGHT;
+    }
+
+    private int formLabelWidth(int width, int controlWidth, int unitSpace) {
+        return Math.max(10, width - controlWidth - unitSpace - 8);
+    }
+
+    private int numberFieldWidth(NumberField field, int width, int unitSpace) {
+        int labelTarget = Math.min(LABEL_WIDTH, Math.max(72, width / 2));
+        int minWidth = Math.min(46, Math.max(34, width - unitSpace));
+        int maxBySpace = Math.max(minWidth, width - unitSpace);
+        int maxByRow = width - labelTarget - unitSpace - 8;
+        int preferred = field.allowsNegative() ? 96 : CONTROL_WIDTH;
+        int target = Math.min(preferred, maxBySpace);
+        if (maxByRow >= minWidth) {
+            target = Math.min(target, maxByRow);
+        }
+        return Math.max(minWidth, Math.min(128, target));
+    }
+
+    private int textFieldWidth(int width) {
+        int labelTarget = Math.min(LABEL_WIDTH, Math.max(72, width / 2));
+        int minWidth = Math.min(82, Math.max(52, width));
+        int maxByRow = width - labelTarget - 8;
+        int target = Math.min(150, width);
+        if (maxByRow >= minWidth) {
+            target = Math.min(target, maxByRow);
+        }
+        return Math.max(minWidth, target);
+    }
+
+    private int dropdownWidth(int width) {
+        int labelTarget = Math.min(LABEL_WIDTH, Math.max(72, width / 2));
+        int minWidth = Math.min(100, Math.max(70, width));
+        int maxByRow = width - labelTarget - 8;
+        int target = Math.min(DROPDOWN_WIDTH, width);
+        if (maxByRow >= minWidth) {
+            target = Math.min(target, maxByRow);
+        }
+        return Math.max(minWidth, target);
     }
 
     private void addNumberField(NumberField field, int x, int y, int width, int fieldHeight) {
-        int fieldWidth = 52;
-        int fieldX = x + width - fieldWidth - 18;
+        addNumberField(field, x, y, width, fieldHeight, canManage);
+    }
+
+    private void addNumberField(NumberField field, int x, int y, int width, int fieldHeight, boolean editable) {
+        int unitTextWidth = field.unit.isBlank() ? 0 : Math.min(UNIT_WIDTH, Math.max(18, textRenderer.getWidth(field.unit)));
+        int unitSpace = field.unit.isBlank() ? 0 : unitTextWidth + 8;
+        int fieldWidth = numberFieldWidth(field, width, unitSpace);
+        int fieldX = x + width - fieldWidth - unitSpace;
         int labelY = y + Math.max(3, (fieldHeight - textRenderer.fontHeight) / 2);
-        labels.add(new Label(field.label, x, labelY, 0xFFC9D4DE, false, Math.max(50, fieldX - x - 8)));
-        labels.add(new Label("秒", fieldX + fieldWidth + 5, labelY, 0xFFC9D4DE));
+        labels.add(new Label(field.label + "：", x, labelY, 0xFFC9D4DE, false, formLabelWidth(width, fieldWidth, unitSpace)));
+        if (!field.unit.isBlank()) {
+            labels.add(new Label(field.unit, fieldX + fieldWidth + 8, labelY, editable ? 0xFFC9D4DE : 0xFF7D8790));
+        }
 
         TextFieldWidget textField = new TextFieldWidget(textRenderer, fieldX, y, fieldWidth, fieldHeight, Text.literal(field.label));
-        textField.setMaxLength(7);
+        textField.setMaxLength(11);
+        textField.setText(Integer.toString(getNumber(editableConfig, field)));
+        textField.setEditable(editable);
+        textField.active = editable;
+        numberFields.put(field, textField);
+        addDrawableChild(textField);
+    }
+
+    private int addCoordinateInput(Layout layout, String axis, NumberField field, int x, int y, int axisWidth, int fieldWidth, int fieldHeight) {
+        int labelY = y + Math.max(3, (fieldHeight - textRenderer.fontHeight) / 2);
+        labels.add(new Label(axis, x, labelY, 0xFF9FAAB4, false, axisWidth));
+
+        int fieldX = x + axisWidth + 2;
+        TextFieldWidget textField = new TextFieldWidget(textRenderer, fieldX, y, fieldWidth, fieldHeight, Text.literal(field.label));
+        textField.setMaxLength(11);
         textField.setText(Integer.toString(getNumber(editableConfig, field)));
         textField.setEditable(canManage);
         textField.active = canManage;
         numberFields.put(field, textField);
         addDrawableChild(textField);
+        return fieldX + fieldWidth;
+    }
+
+    private void addStringField(StringField field, int x, int y, int width, int fieldHeight) {
+        int fieldWidth = textFieldWidth(width);
+        int fieldX = x + width - fieldWidth;
+        int labelY = y + Math.max(3, (fieldHeight - textRenderer.fontHeight) / 2);
+        labels.add(new Label(field.label + "：", x, labelY, 0xFFC9D4DE, false, Math.max(10, fieldX - x - 8)));
+
+        TextFieldWidget textField = new TextFieldWidget(textRenderer, fieldX, y, fieldWidth, fieldHeight, Text.literal(field.label));
+        textField.setMaxLength(field.maxLength);
+        textField.setText(getString(editableConfig, field));
+        textField.setEditable(canManage);
+        textField.active = canManage;
+        stringFields.put(field, textField);
+        addDrawableChild(textField);
+    }
+
+    private void addDropdownField(DropdownField field, int x, int y, int width, int height, boolean openUp, boolean enabled) {
+        DropdownWidget dropdown = new DropdownWidget(
+                textRenderer,
+                x,
+                y,
+                width,
+                height,
+                "",
+                field.options,
+                getDropdownValue(editableConfig, field),
+                enabled,
+                value -> selectDropdownField(field, value),
+                this::closeDropdowns
+        );
+        dropdown.setOpenUp(openUp);
+        dropdownFields.put(field, dropdown);
+        addDrawableChild(dropdown);
     }
 
     private void addToggleField(ToggleField field, int x, int y, int width, int height) {
@@ -376,6 +1289,28 @@ public class HunterWildcardConfigScreen extends Screen {
         );
     }
 
+    private void addBooleanField(BooleanField field, int x, int y, int width, int height) {
+        boolean enabled = getBoolean(editableConfig, field);
+        int buttonWidth = width < 320
+                ? Math.max(78, Math.min(116, width / 2))
+                : Math.min(150, Math.max(CONTROL_WIDTH, width / 2));
+        buttonWidth = Math.min(buttonWidth, width);
+        int buttonX = x + width - buttonWidth;
+        int labelY = y + Math.max(3, (height - textRenderer.fontHeight) / 2);
+        labels.add(new Label(field.label + "：", x, labelY, 0xFFC9D4DE, false, Math.max(10, buttonX - x - 8)));
+        addButton(
+                buttonX,
+                y,
+                buttonWidth,
+                height,
+                enabled ? "开启" : "关闭",
+                "",
+                widget -> toggleBooleanField(field),
+                enabled ? ButtonVariant.TOGGLE_ON : ButtonVariant.TOGGLE_OFF,
+                canManage
+        );
+    }
+
     private void addContentLabel(Layout layout, String text, int x, int y, int color) {
         addContentLabel(layout, text, x, y, color, false);
     }
@@ -387,8 +1322,33 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private void addContentNumberField(Layout layout, NumberField field, int x, int y, int width, int fieldHeight) {
-        if (isVisibleInContent(layout, y, fieldHeight)) {
-            addNumberField(field, x, y, width, fieldHeight);
+        if (isVisibleInContent(layout, y, ROW_HEIGHT)) {
+            addNumberField(field, x, controlY(y), width, fieldHeight);
+        }
+    }
+
+    private void addContentNumberField(Layout layout, NumberField field, int x, int y, int width, int fieldHeight, boolean editable) {
+        if (isVisibleInContent(layout, y, ROW_HEIGHT)) {
+            addNumberField(field, x, controlY(y), width, fieldHeight, editable);
+        }
+    }
+
+    private void addContentStringField(Layout layout, StringField field, int x, int y, int width, int fieldHeight) {
+        if (isVisibleInContent(layout, y, ROW_HEIGHT)) {
+            addStringField(field, x, controlY(y), width, fieldHeight);
+        }
+    }
+
+    private void addContentDropdownField(Layout layout, DropdownField field, int x, int y, int width, int height) {
+        addContentDropdownField(layout, field, x, y, width, height, canManage);
+    }
+
+    private void addContentDropdownField(Layout layout, DropdownField field, int x, int y, int width, int height, boolean editable) {
+        if (isVisibleInContent(layout, y, height)) {
+            int menuHeight = Math.max(18, height) * field.options.size();
+            boolean openUp = y + height + 1 + menuHeight > layout.viewportBottom()
+                    && y - menuHeight - 1 >= layout.viewportTop();
+            addDropdownField(field, x, y, width, height, openUp, editable);
         }
     }
 
@@ -398,24 +1358,32 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    private void addContentBooleanField(Layout layout, BooleanField field, int x, int y, int width, int height) {
+        if (isVisibleInContent(layout, y, height)) {
+            addBooleanField(field, x, buttonY(y), width, height);
+        }
+    }
+
     private void addContentButton(Layout layout, int x, int y, int width, int height, String title, String description, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled) {
         if (isVisibleInContent(layout, y, height)) {
             addButton(x, y, width, height, title, description, action, variant, enabled);
         }
     }
 
-    private void addButton(int x, int y, int width, int height, String title, String description, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled) {
-        StyledButtonWidget button = new StyledButtonWidget(x, y, width, height, title, description, action, variant);
+    private StyledButtonWidget addButton(int x, int y, int width, int height, String title, String description, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled) {
+        String tooltip = description == null ? "" : description;
+        if (!enabled && tooltip.isBlank() && isConfigEditPage() && !canManage) {
+            tooltip = "你没有权限修改配置。";
+        }
+
+        StyledButtonWidget button = new StyledButtonWidget(x, y, width, height, title, tooltip, action, variant);
         button.active = enabled;
         addDrawableChild(button);
-    }
-
-    private void addBox(int x, int y, int width, int height) {
-        boxes.add(new Box(x, y, width, height, 0x88303A46, 0xFF4C5A66));
+        return button;
     }
 
     private int pageTop(Layout layout) {
-        return layout.contentY() - contentScroll;
+        return layout.viewportTop() - renderedScroll;
     }
 
     private void markContentBottom(Layout layout, int screenBottomY) {
@@ -423,37 +1391,215 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private boolean isVisibleInContent(Layout layout, int y, int height) {
-        return y >= layout.contentY() && y + height <= layout.contentBottom();
+        return y >= layout.viewportTop() && y + height <= layout.viewportBottom();
+    }
+
+    private boolean isVisibleInContentPartial(Layout layout, int y, int height) {
+        return y + height > layout.viewportTop() && y < layout.viewportBottom();
     }
 
     private boolean isInsideContent(Layout layout, double mouseX, double mouseY) {
         return mouseX >= layout.contentX()
                 && mouseX <= layout.contentX() + layout.contentWidth()
-                && mouseY >= layout.contentY()
-                && mouseY <= layout.contentBottom();
+                && mouseY >= layout.viewportTop()
+                && mouseY <= layout.viewportBottom();
     }
 
-    private int maxContentScroll(Layout layout) {
-        return Math.max(0, pageContentHeight - layout.contentHeight());
+    private void updateMaxScroll(Layout layout) {
+        maxScroll = Math.max(0.0F, pageContentHeight - layout.viewportHeight());
+        clampScroll(layout);
+    }
+
+    private boolean updateSmoothScroll(Layout layout, float delta) {
+        updateMaxScroll(layout);
+        float before = scrollOffset;
+        float smoothing = 1.0F - (float) Math.pow(0.001F, Math.max(0.0F, delta) / 8.0F);
+        if (Math.abs(targetScrollOffset - scrollOffset) < 0.5F) {
+            scrollOffset = targetScrollOffset;
+        } else {
+            scrollOffset += (targetScrollOffset - scrollOffset) * Math.max(0.0F, Math.min(1.0F, smoothing));
+        }
+
+        clampScroll(layout);
+        rememberCurrentScroll();
+        int oldRenderedScroll = renderedScroll;
+        renderedScroll = Math.round(scrollOffset);
+        return Math.round(before) != renderedScroll || oldRenderedScroll != renderedScroll;
     }
 
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
+    private float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private void clampScroll(Layout layout) {
+        float nextMaxScroll = Math.max(0.0F, pageContentHeight - layout.viewportHeight());
+        scrollOffset = clamp(scrollOffset, 0.0F, nextMaxScroll);
+        targetScrollOffset = clamp(targetScrollOffset, 0.0F, nextMaxScroll);
+        maxScroll = nextMaxScroll;
+        renderedScroll = Math.round(scrollOffset);
+    }
+
+    private void rememberCurrentScroll() {
+        pageScrollOffsets.put(currentPage, scrollOffset);
+        pageTargetScrollOffsets.put(currentPage, targetScrollOffset);
+    }
+
+    private void restorePageScroll(Page page) {
+        scrollOffset = pageScrollOffsets.getOrDefault(page, 0.0F);
+        targetScrollOffset = pageTargetScrollOffsets.getOrDefault(page, scrollOffset);
+        renderedScroll = Math.round(scrollOffset);
+    }
+
     private void renderScrollBar(DrawContext context, Layout layout) {
-        int maxScroll = maxContentScroll(layout);
-        if (maxScroll <= 0) {
+        updateMaxScroll(layout);
+        if (maxScroll <= 0.5F) {
             return;
         }
 
-        int trackX = layout.contentX() + layout.contentWidth() - 4;
-        int trackTop = layout.contentY() + 2;
-        int trackHeight = Math.max(16, layout.contentHeight() - 4);
-        int thumbHeight = Math.max(18, trackHeight * layout.contentHeight() / Math.max(layout.contentHeight(), pageContentHeight));
-        int thumbY = trackTop + (trackHeight - thumbHeight) * contentScroll / maxScroll;
+        int trackX = layout.scrollBarX();
+        int trackTop = layout.viewportTop();
+        int trackHeight = Math.max(16, layout.viewportHeight());
+        int thumbHeight = Math.max(24, Math.round(trackHeight * (layout.viewportHeight() / (float) Math.max(layout.viewportHeight(), pageContentHeight))));
+        int thumbY = trackTop + Math.round((trackHeight - thumbHeight) * (scrollOffset / maxScroll));
         context.fill(trackX, trackTop, trackX + 2, trackTop + trackHeight, 0x664C5A66);
         context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbHeight, 0xCC7FC2FF);
+    }
+
+    private void updateNavigationScroll(Layout layout) {
+        int pageCount = visiblePages().size();
+        int buttonHeight = 24;
+        int buttonGap = 6;
+        int totalHeight = pageCount * buttonHeight + Math.max(0, pageCount - 1) * buttonGap;
+        maxNavScroll = Math.max(0.0F, totalHeight - navigationHeight(layout));
+        navScroll = clamp(navScroll, 0.0F, maxNavScroll);
+    }
+
+    private void renderNavigationScrollBar(DrawContext context, Layout layout) {
+        updateNavigationScroll(layout);
+        if (maxNavScroll <= 0.5F) {
+            return;
+        }
+
+        int trackX = layout.panelX() + layout.navWidth() - 7;
+        int trackTop = navigationTop(layout);
+        int trackHeight = navigationHeight(layout);
+        int totalHeight = Math.round(trackHeight + maxNavScroll);
+        int thumbHeight = Math.max(20, Math.round(trackHeight * (trackHeight / (float) Math.max(trackHeight, totalHeight))));
+        int thumbY = trackTop + Math.round((trackHeight - thumbHeight) * (navScroll / maxNavScroll));
+        context.fill(trackX, trackTop, trackX + 2, trackTop + trackHeight, 0x554C5A66);
+        context.fill(trackX - 1, thumbY, trackX + 3, thumbY + thumbHeight, 0xAA7FC2FF);
+    }
+
+    private int navigationTop(Layout layout) {
+        return layout.panelY() + 48;
+    }
+
+    private int navigationBottom(Layout layout) {
+        return layout.panelY() + layout.panelHeight() - 14;
+    }
+
+    private int navigationHeight(Layout layout) {
+        return Math.max(24, navigationBottom(layout) - navigationTop(layout));
+    }
+
+    private boolean isInsideNavigation(Layout layout, double mouseX, double mouseY) {
+        return mouseX >= layout.panelX()
+                && mouseX <= layout.panelX() + layout.navWidth()
+                && mouseY >= navigationTop(layout)
+                && mouseY <= navigationBottom(layout);
+    }
+
+    private void renderDropdownOverlays(DrawContext context, int mouseX, int mouseY, float delta) {
+        for (DropdownWidget dropdown : dropdownFields.values()) {
+            dropdown.renderOverlay(context, mouseX, mouseY, delta);
+        }
+    }
+
+    private void renderHoverTooltip(DrawContext context) {
+        if (!hoverTooltip.isBlank()) {
+            int tooltipWidth = Math.min(240, Math.max(120, width - 24));
+            List<Text> lines = wrapTooltipText(hoverTooltip, tooltipWidth);
+            context.drawTooltip(textRenderer, lines, hoverTooltipX, hoverTooltipY);
+        }
+    }
+
+    private List<Text> wrapTooltipText(String text, int maxWidth) {
+        List<Text> lines = new ArrayList<>();
+        String remaining = text == null ? "" : text.trim();
+        while (!remaining.isEmpty()) {
+            String line = textRenderer.trimToWidth(remaining, maxWidth);
+            if (line.isBlank()) {
+                line = remaining.substring(0, 1);
+            }
+            lines.add(Text.literal(line));
+            remaining = remaining.substring(line.length()).trim();
+        }
+        return lines.isEmpty() ? List.of(Text.empty()) : lines;
+    }
+
+    private void setHoverTooltip(String tooltip, int mouseX, int mouseY) {
+        if (tooltip == null || tooltip.isBlank()) {
+            return;
+        }
+
+        hoverTooltip = tooltip;
+        hoverTooltipX = mouseX;
+        hoverTooltipY = mouseY;
+    }
+
+    private void renderToast(DrawContext context, Layout layout, float delta) {
+        if (toastDurationMs <= 0L || toastMessage.isBlank()) {
+            return;
+        }
+
+        long elapsedMs = System.currentTimeMillis() - toastStartTimeMs;
+        long totalMs = toastDurationMs;
+        if (elapsedMs >= totalMs) {
+            toastDurationMs = 0L;
+            return;
+        }
+
+        float age = Math.max(0L, elapsedMs);
+        float alpha;
+        if (age < TOAST_FADE_IN_MS) {
+            alpha = smoothStep(age / TOAST_FADE_IN_MS);
+        } else if (age > TOAST_FADE_IN_MS + TOAST_HOLD_MS) {
+            alpha = 1.0F - smoothStep((age - TOAST_FADE_IN_MS - TOAST_HOLD_MS) / TOAST_FADE_OUT_MS);
+        } else {
+            alpha = 1.0F;
+        }
+
+        alpha = Math.max(0.0F, Math.min(1.0F, alpha));
+        int maxWidth = Math.max(90, Math.min(260, layout.usableContentWidth() - 12));
+        String text = trim(toastMessage, maxWidth - 18);
+        int toastWidth = Math.min(maxWidth, textRenderer.getWidth(text) + 18);
+        int toastHeight = 24;
+        int toastX = layout.usableContentWidth() < 320
+                ? layout.contentX() + (layout.usableContentWidth() - toastWidth) / 2
+                : layout.contentX() + layout.usableContentWidth() - toastWidth - 6;
+        int toastY = layout.footerTop() - toastHeight - 8 + Math.round((1.0F - alpha) * 4.0F);
+
+        context.fill(toastX, toastY, toastX + toastWidth, toastY + toastHeight, withAlpha(0xCC101820, alpha));
+        context.fill(toastX, toastY, toastX + toastWidth, toastY + 1, withAlpha(toastKind.color, alpha));
+        context.fill(toastX, toastY + toastHeight - 1, toastX + toastWidth, toastY + toastHeight, withAlpha(0xFF4C5A66, alpha));
+        context.fill(toastX, toastY, toastX + 1, toastY + toastHeight, withAlpha(0xFF4C5A66, alpha));
+        context.fill(toastX + toastWidth - 1, toastY, toastX + toastWidth, toastY + toastHeight, withAlpha(0xFF4C5A66, alpha));
+        context.drawText(textRenderer, Text.literal(text), toastX + 9, toastY + 7, withAlpha(toastKind.color, alpha), true);
+    }
+
+    private float smoothStep(float value) {
+        float t = Math.max(0.0F, Math.min(1.0F, value));
+        return t * t * (3.0F - 2.0F * t);
+    }
+
+    private void closeDropdowns() {
+        for (DropdownWidget dropdown : dropdownFields.values()) {
+            dropdown.close();
+        }
     }
 
     private void switchPage(Page page) {
@@ -465,8 +1611,13 @@ public class HunterWildcardConfigScreen extends Screen {
             return;
         }
 
+        closeDropdowns();
+        rememberCurrentScroll();
         currentPage = page;
-        contentScroll = 0;
+        if (page != Page.WILDCARD) {
+            selectedWildcardSettings = null;
+        }
+        restorePageScroll(page);
         clearAndInit();
     }
 
@@ -479,6 +1630,46 @@ public class HunterWildcardConfigScreen extends Screen {
         clearAndInit();
     }
 
+    private void openWildcardSettings(ToggleField field) {
+        if (!hasWildcardSettings(field) || editableConfig == null) {
+            return;
+        }
+
+        if (!applyVisibleInputs(true)) {
+            return;
+        }
+
+        selectedWildcardSettings = field;
+        clearAndInit();
+    }
+
+    private void closeWildcardSettings() {
+        if (!applyVisibleInputs(true)) {
+            return;
+        }
+
+        selectedWildcardSettings = null;
+        clearAndInit();
+    }
+
+    private void toggleBooleanField(BooleanField field) {
+        if (!canManage || editableConfig == null || !applyVisibleInputs(true)) {
+            return;
+        }
+
+        editableConfig = setBoolean(editableConfig, field, !getBoolean(editableConfig, field));
+        clearAndInit();
+    }
+
+    private void selectDropdownField(DropdownField field, String value) {
+        if (!canManage || editableConfig == null || !applyVisibleInputs(true)) {
+            return;
+        }
+
+        editableConfig = setDropdownValue(editableConfig, field, value);
+        clearAndInit();
+    }
+
     private boolean applyVisibleInputs(boolean showErrors) {
         if (editableConfig == null) {
             return true;
@@ -486,23 +1677,41 @@ public class HunterWildcardConfigScreen extends Screen {
 
         ConfigSnapshot updated = editableConfig;
         for (Map.Entry<NumberField, TextFieldWidget> entry : numberFields.entrySet()) {
+            if (!entry.getValue().active) {
+                continue;
+            }
+
             String raw = entry.getValue().getText().trim();
             int value;
             try {
                 value = Integer.parseInt(raw);
             } catch (NumberFormatException exception) {
-                statusMessage = showErrors
+                showError(showErrors
                         ? entry.getKey().label + " 必须是整数。"
-                        : "请先修正当前页的数字输入。";
+                        : "请先修正当前页的数字输入。");
                 return false;
             }
 
-            if (value <= 0) {
-                statusMessage = entry.getKey().label + " 必须大于 0。";
+            if (value < entry.getKey().minValue) {
+                showError(entry.getKey().label + " 必须不小于 " + entry.getKey().minValue + "。");
                 return false;
             }
 
             updated = setNumber(updated, entry.getKey(), value);
+        }
+
+        for (Map.Entry<StringField, TextFieldWidget> entry : stringFields.entrySet()) {
+            if (!entry.getValue().active) {
+                continue;
+            }
+
+            String value = entry.getValue().getText().trim();
+            if (value.isBlank()) {
+                showError(entry.getKey().label + " 不能为空。");
+                return false;
+            }
+
+            updated = setString(updated, entry.getKey(), value);
         }
 
         editableConfig = updated;
@@ -511,23 +1720,57 @@ public class HunterWildcardConfigScreen extends Screen {
 
     private void saveConfig() {
         if (!canManage) {
-            statusMessage = "只有 OP 可以保存配置。";
+            showError("只有 OP 可以保存配置。");
             return;
         }
 
-        if (!applyVisibleInputs(true) || editableConfig == null) {
+        if (editableConfig == null) {
             return;
         }
 
+        if (!canSaveConfig()) {
+            showInfo("没有未保存的配置。");
+            return;
+        }
+
+        if (!applyVisibleInputs(true)) {
+            return;
+        }
+
+        if (!hasUnsavedChanges()) {
+            showInfo("没有未保存的配置。");
+            return;
+        }
+
+        cachedEditableConfig = editableConfig;
+        manualSaveRequested = true;
         sendPayload(new HunterWildcardPackets.UpdateConfigPayload(editableConfig), HunterWildcardPackets.C2S_UPDATE_CONFIG, "已提交保存请求。");
+    }
+
+    private void restoreDefaultConfig() {
+        if (!canManage) {
+            showError("只有 OP 可以恢复默认配置。");
+            return;
+        }
+
+        ModConfig defaults = new ModConfig();
+        defaults.validate();
+        editableConfig = ConfigSnapshot.from(defaults);
+        cachedEditableConfig = editableConfig;
+        manualReloadRequested = false;
+        manualSaveRequested = false;
+        showToast("已恢复默认配置，保存后生效。", StatusKind.INFO);
+        clearAndInit();
     }
 
     private void reloadConfig() {
         if (!canManage) {
-            statusMessage = "只有 OP 可以重新加载配置。";
+            showError("只有 OP 可以重新加载配置。");
             return;
         }
 
+        cachedEditableConfig = null;
+        manualReloadRequested = true;
         sendPayload(new HunterWildcardPackets.ReloadConfigPayload(), HunterWildcardPackets.C2S_RELOAD_CONFIG, "已提交重新加载请求。");
     }
 
@@ -536,17 +1779,20 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private void requestConfig(boolean updateMessage) {
-        sendPayload(new HunterWildcardPackets.RequestConfigPayload(), HunterWildcardPackets.C2S_REQUEST_CONFIG, "正在等待服务器同步...", updateMessage);
+        if (updateMessage) {
+            setFooterStatus("正在请求服务器数据...", StatusKind.INFO);
+        }
+        sendPayload(new HunterWildcardPackets.RequestConfigPayload(), HunterWildcardPackets.C2S_REQUEST_CONFIG, "正在等待服务器同步...", false);
     }
 
     private void sendDebugAction(DebugAction action) {
         if (!canManage) {
-            statusMessage = "只有 OP 可以执行调试操作。";
+            showError("只有 OP 可以执行调试操作。");
             return;
         }
 
         if (!isDebugPageEnabled()) {
-            statusMessage = "请先使用 /hw ts true 打开调试页。";
+            showError("请先使用 /hw ts true 打开调试页。");
             return;
         }
 
@@ -555,12 +1801,12 @@ public class HunterWildcardConfigScreen extends Screen {
 
     private void sendTestWildcard(ToggleField field) {
         if (!canManage) {
-            statusMessage = "只有 OP 可以测试外卡。";
+            showError("只有 OP 可以测试外卡。");
             return;
         }
 
         if (!isDebugPageEnabled()) {
-            statusMessage = "请先使用 /hw ts true 打开调试页。";
+            showError("请先使用 /hw ts true 打开调试页。");
             return;
         }
 
@@ -581,8 +1827,11 @@ public class HunterWildcardConfigScreen extends Screen {
 
     private void sendPayload(CustomPayload payload, CustomPayload.Id<?> id, String successMessage, boolean updateMessage) {
         if (!canSend(id)) {
+            if (id.equals(HunterWildcardPackets.C2S_REQUEST_CONFIG)) {
+                setFooterStatus("服务器同步失败：未启用猎人外卡同步。", StatusKind.ERROR);
+            }
             if (updateMessage) {
-                statusMessage = "当前服务器未启用猎人外卡同步。";
+                showError("当前服务器未启用猎人外卡同步。");
             }
             return;
         }
@@ -590,11 +1839,14 @@ public class HunterWildcardConfigScreen extends Screen {
         try {
             ClientPlayNetworking.send(payload);
             if (updateMessage) {
-                statusMessage = successMessage;
+                showToast(successMessage, StatusKind.INFO);
             }
         } catch (IllegalStateException exception) {
+            if (id.equals(HunterWildcardPackets.C2S_REQUEST_CONFIG)) {
+                setFooterStatus("服务器同步失败：当前未连接到服务器。", StatusKind.ERROR);
+            }
             if (updateMessage) {
-                statusMessage = "当前未连接到服务器。";
+                showError("当前未连接到服务器。");
             }
         }
     }
@@ -607,14 +1859,61 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    private void showInfo(String message) {
+        showToast(message, StatusKind.INFO);
+    }
+
+    private void showSuccess(String message) {
+        showToast(message, StatusKind.SUCCESS);
+    }
+
+    private void showError(String message) {
+        showToast(message, StatusKind.ERROR);
+    }
+
+    private void setFooterStatus(String message, StatusKind kind) {
+        statusMessage = message;
+        statusKind = kind;
+    }
+
+    private void showToast(String message, StatusKind kind) {
+        toastMessage = message == null ? "" : message;
+        toastKind = kind == null ? StatusKind.INFO : kind;
+        toastStartTimeMs = System.currentTimeMillis();
+        toastDurationMs = TOAST_FADE_IN_MS + TOAST_HOLD_MS + TOAST_FADE_OUT_MS;
+    }
+
     private void applySync(SyncConfigPayload payload) {
+        boolean preserveLocalEdits = payload.canManage()
+                && editableConfig != null
+                && !manualReloadRequested
+                && !manualSaveRequested
+                && (hasUnsavedChanges() || hasVisibleInputChanges() || hasFocusedTextField());
         serverSync = payload;
-        editableConfig = payload.config();
         canManage = payload.canManage();
-        if (!payload.debugPageEnabled() && currentPage == Page.DEBUG) {
-            currentPage = Page.GAME;
+        ensureVisiblePage();
+        if (manualReloadRequested || manualSaveRequested || !preserveLocalEdits) {
+            editableConfig = payload.config();
+            cachedEditableConfig = null;
+        } else {
+            cachedEditableConfig = editableConfig;
         }
-        statusMessage = "已同步服务器数据。";
+
+        if (manualReloadRequested) {
+            showToast("已重新加载服务器配置。", StatusKind.SUCCESS);
+            setFooterStatus("", StatusKind.INFO);
+        } else if (manualSaveRequested) {
+            showToast("已保存服务器配置。", StatusKind.SUCCESS);
+            setFooterStatus("", StatusKind.INFO);
+        } else if (!hasSyncedOnce) {
+            setFooterStatus("", StatusKind.INFO);
+        } else if ("正在请求服务器数据...".equals(statusMessage) || "正在等待服务器同步...".equals(statusMessage)) {
+            setFooterStatus("", StatusKind.INFO);
+        }
+
+        hasSyncedOnce = true;
+        manualReloadRequested = false;
+        manualSaveRequested = false;
         clearAndInit();
     }
 
@@ -630,11 +1929,30 @@ public class HunterWildcardConfigScreen extends Screen {
         List<Page> pages = new ArrayList<>();
         pages.add(Page.GAME);
         pages.add(Page.TEAM);
-        pages.add(Page.CONFIG);
+        pages.add(Page.BASIC);
+        pages.add(Page.VICTORY);
+        pages.add(Page.RESPAWN);
+        pages.add(Page.WILDCARD);
         if (isDebugPageEnabled()) {
             pages.add(Page.DEBUG);
         }
         return pages;
+    }
+
+    private void ensureVisiblePage() {
+        if (currentPage == Page.DEBUG && !isDebugPageEnabled()) {
+            currentPage = Page.GAME;
+            restorePageScroll(currentPage);
+        }
+    }
+
+    private boolean isConfigEditPage() {
+        return currentPage == Page.BASIC || currentPage == Page.VICTORY || currentPage == Page.RESPAWN || currentPage == Page.WILDCARD;
+    }
+
+    private boolean isHunterKillCountMode() {
+        return editableConfig != null
+                && HunterVictoryType.fromConfig(editableConfig.hunterVictoryType(), HunterVictoryType.RUNNERS_OUT) == HunterVictoryType.RUNNER_KILL_COUNT;
     }
 
     private int getNumber(ConfigSnapshot config, NumberField field) {
@@ -648,29 +1966,88 @@ public class HunterWildcardConfigScreen extends Screen {
             case ACTION_BAR_INTERVAL_SECONDS -> config.actionBarIntervalSeconds();
             case HUNTER_RADAR_INTERVAL_SECONDS -> config.hunterRadarIntervalSeconds();
             case SUPPLY_DROP_INTERVAL_SECONDS -> config.supplyDropIntervalSeconds();
+            case HUNTER_PREPARE_BOUNDARY_RADIUS -> config.hunterPrepareBoundaryRadius();
+            case HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE -> config.hunterPrepareBoundaryWarnDistance();
+            case SURVIVE_TIME_SECONDS -> config.surviveTimeSeconds();
+            case TARGET_X -> config.targetX();
+            case TARGET_Y -> config.targetY();
+            case TARGET_Z -> config.targetZ();
+            case TARGET_RADIUS -> config.targetRadius();
+            case TARGET_ITEM_COUNT -> config.targetItemCount();
+            case HUNTER_LIVES -> config.hunterLives();
+            case RUNNER_LIVES -> config.runnerLives();
+            case RUNNER_RESPAWN_SECONDS -> config.runnerRespawnSeconds();
+            case HUNTER_RUNNER_KILL_TARGET -> config.hunterRunnerKillTarget();
         };
     }
 
     private ConfigSnapshot setNumber(ConfigSnapshot config, NumberField field, int value) {
-        return new ConfigSnapshot(
-                field == NumberField.PREPARING_SECONDS ? value : config.preparingSeconds(),
-                field == NumberField.ENDING_SECONDS ? value : config.endingSeconds(),
-                field == NumberField.COMPASS_UPDATE_SECONDS ? value : config.compassUpdateSeconds(),
-                field == NumberField.HUNTER_RESPAWN_SECONDS ? value : config.hunterRespawnSeconds(),
-                field == NumberField.WILDCARD_INTERVAL_SECONDS ? value : config.wildcardIntervalSeconds(),
-                field == NumberField.WILDCARD_DURATION_SECONDS ? value : config.wildcardDurationSeconds(),
-                field == NumberField.ACTION_BAR_INTERVAL_SECONDS ? value : config.actionBarIntervalSeconds(),
-                field == NumberField.HUNTER_RADAR_INTERVAL_SECONDS ? value : config.hunterRadarIntervalSeconds(),
-                field == NumberField.SUPPLY_DROP_INTERVAL_SECONDS ? value : config.supplyDropIntervalSeconds(),
-                config.enableSpeedRush(),
-                config.enableFeatherweight(),
-                config.enableGlowing(),
-                config.enableNightHunt(),
-                config.enableExplosiveDeath(),
-                config.enableSupplyDrop(),
-                config.enableHunterRadar(),
-                config.enableCompassChaos()
-        );
+        ModConfig copy = config.toConfig();
+        switch (field) {
+            case PREPARING_SECONDS -> copy.preparingSeconds = value;
+            case ENDING_SECONDS -> copy.endingSeconds = value;
+            case COMPASS_UPDATE_SECONDS -> copy.compassUpdateSeconds = value;
+            case HUNTER_RESPAWN_SECONDS -> copy.hunterRespawnSeconds = value;
+            case WILDCARD_INTERVAL_SECONDS -> copy.wildcardIntervalSeconds = value;
+            case WILDCARD_DURATION_SECONDS -> copy.wildcardDurationSeconds = value;
+            case ACTION_BAR_INTERVAL_SECONDS -> copy.actionBarIntervalSeconds = value;
+            case HUNTER_RADAR_INTERVAL_SECONDS -> copy.hunterRadarIntervalSeconds = value;
+            case SUPPLY_DROP_INTERVAL_SECONDS -> copy.supplyDropIntervalSeconds = value;
+            case HUNTER_PREPARE_BOUNDARY_RADIUS -> copy.hunterPrepareBoundaryRadius = value;
+            case HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE -> copy.hunterPrepareBoundaryWarnDistance = value;
+            case SURVIVE_TIME_SECONDS -> copy.surviveTimeSeconds = value;
+            case TARGET_X -> copy.targetX = value;
+            case TARGET_Y -> copy.targetY = value;
+            case TARGET_Z -> copy.targetZ = value;
+            case TARGET_RADIUS -> copy.targetRadius = value;
+            case TARGET_ITEM_COUNT -> copy.targetItemCount = value;
+            case HUNTER_LIVES -> copy.hunterLives = value;
+            case RUNNER_LIVES -> copy.runnerLives = value;
+            case RUNNER_RESPAWN_SECONDS -> copy.runnerRespawnSeconds = value;
+            case HUNTER_RUNNER_KILL_TARGET -> copy.hunterRunnerKillTarget = value;
+        }
+        copy.validate();
+        return ConfigSnapshot.from(copy);
+    }
+
+    private String getString(ConfigSnapshot config, StringField field) {
+        return switch (field) {
+            case TARGET_ITEM_ID -> config.targetItemId();
+        };
+    }
+
+    private ConfigSnapshot setString(ConfigSnapshot config, StringField field, String value) {
+        ModConfig copy = config.toConfig();
+        switch (field) {
+            case TARGET_ITEM_ID -> copy.targetItemId = value;
+        }
+        copy.validate();
+        return ConfigSnapshot.from(copy);
+    }
+
+    private String getDropdownValue(ConfigSnapshot config, DropdownField field) {
+        return switch (field) {
+            case RUNNER_VICTORY_TYPE -> config.runnerVictoryType();
+            case HUNTER_VICTORY_TYPE -> config.hunterVictoryType();
+            case HUNTER_RESPAWN_MODE -> config.hunterRespawnMode();
+            case RUNNER_RESPAWN_MODE -> config.runnerRespawnMode();
+            case RUNNER_TEAM_LOSS_MODE -> config.runnerTeamLossMode();
+            case TARGET_DIMENSION -> config.targetDimension();
+        };
+    }
+
+    private ConfigSnapshot setDropdownValue(ConfigSnapshot config, DropdownField field, String value) {
+        ModConfig copy = config.toConfig();
+        switch (field) {
+            case RUNNER_VICTORY_TYPE -> copy.runnerVictoryType = value;
+            case HUNTER_VICTORY_TYPE -> copy.hunterVictoryType = value;
+            case HUNTER_RESPAWN_MODE -> copy.hunterRespawnMode = value;
+            case RUNNER_RESPAWN_MODE -> copy.runnerRespawnMode = value;
+            case RUNNER_TEAM_LOSS_MODE -> copy.runnerTeamLossMode = value;
+            case TARGET_DIMENSION -> copy.targetDimension = value;
+        }
+        copy.validate();
+        return ConfigSnapshot.from(copy);
     }
 
     private boolean getToggle(ConfigSnapshot config, ToggleField field) {
@@ -687,25 +2064,34 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private ConfigSnapshot setToggle(ConfigSnapshot config, ToggleField field, boolean value) {
-        return new ConfigSnapshot(
-                config.preparingSeconds(),
-                config.endingSeconds(),
-                config.compassUpdateSeconds(),
-                config.hunterRespawnSeconds(),
-                config.wildcardIntervalSeconds(),
-                config.wildcardDurationSeconds(),
-                config.actionBarIntervalSeconds(),
-                config.hunterRadarIntervalSeconds(),
-                config.supplyDropIntervalSeconds(),
-                field == ToggleField.SPEED_RUSH ? value : config.enableSpeedRush(),
-                field == ToggleField.FEATHERWEIGHT ? value : config.enableFeatherweight(),
-                field == ToggleField.GLOWING ? value : config.enableGlowing(),
-                field == ToggleField.NIGHT_HUNT ? value : config.enableNightHunt(),
-                field == ToggleField.EXPLOSIVE_DEATH ? value : config.enableExplosiveDeath(),
-                field == ToggleField.SUPPLY_DROP ? value : config.enableSupplyDrop(),
-                field == ToggleField.HUNTER_RADAR ? value : config.enableHunterRadar(),
-                field == ToggleField.COMPASS_CHAOS ? value : config.enableCompassChaos()
-        );
+        ModConfig copy = config.toConfig();
+        switch (field) {
+            case SPEED_RUSH -> copy.enableSpeedRush = value;
+            case FEATHERWEIGHT -> copy.enableFeatherweight = value;
+            case GLOWING -> copy.enableGlowing = value;
+            case NIGHT_HUNT -> copy.enableNightHunt = value;
+            case EXPLOSIVE_DEATH -> copy.enableExplosiveDeath = value;
+            case SUPPLY_DROP -> copy.enableSupplyDrop = value;
+            case HUNTER_RADAR -> copy.enableHunterRadar = value;
+            case COMPASS_CHAOS -> copy.enableCompassChaos = value;
+        }
+        copy.validate();
+        return ConfigSnapshot.from(copy);
+    }
+
+    private boolean getBoolean(ConfigSnapshot config, BooleanField field) {
+        return switch (field) {
+            case HUNTER_PREPARE_BOUNDARY_ENABLED -> config.hunterPrepareBoundaryEnabled();
+        };
+    }
+
+    private ConfigSnapshot setBoolean(ConfigSnapshot config, BooleanField field, boolean value) {
+        ModConfig copy = config.toConfig();
+        switch (field) {
+            case HUNTER_PREPARE_BOUNDARY_ENABLED -> copy.hunterPrepareBoundaryEnabled = value;
+        }
+        copy.validate();
+        return ConfigSnapshot.from(copy);
     }
 
     private String stateName(GameState state) {
@@ -717,58 +2103,581 @@ public class HunterWildcardConfigScreen extends Screen {
         };
     }
 
+    private int stateColor(GameState state) {
+        return switch (state) {
+            case WAITING -> 0xFF9FAAB4;
+            case PREPARING -> 0xFFFFD966;
+            case RUNNING -> 0xFF77E287;
+            case ENDING -> 0xFFFF8A8A;
+        };
+    }
+
+    private String formatSeconds(int seconds) {
+        return seconds < 0 ? "无" : seconds + " 秒";
+    }
+
+    private String wildcardDisplayName() {
+        if (serverSync == null || serverSync.activeWildcard() == null || serverSync.activeWildcard().isBlank() || "无".equals(serverSync.activeWildcard())) {
+            return "暂无外卡";
+        }
+        return serverSync.activeWildcard();
+    }
+
+    private String compactWildcardDisplayName() {
+        String name = wildcardDisplayName();
+        return "暂无外卡".equals(name) ? "无" : name;
+    }
+
+    private boolean hasWildcardSettings(ToggleField field) {
+        return field == ToggleField.HUNTER_RADAR || field == ToggleField.SUPPLY_DROP;
+    }
+
+    private int enabledWildcardCount(ConfigSnapshot config) {
+        int count = 0;
+        for (ToggleField field : ToggleField.values()) {
+            if (getToggle(config, field)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private String startGameTooltip(boolean waiting) {
+        if (!canManage) {
+            return "只有 OP 可以开始游戏。";
+        }
+
+        if (!waiting) {
+            return "只有等待中状态可以开始游戏。";
+        }
+
+        if (serverSync == null || serverSync.hunterCount() == 0 || serverSync.runnerCount() == 0) {
+            return "至少需要 1 名猎人和 1 名逃亡者。";
+        }
+
+        return "";
+    }
+
+    private String startConditionDisplay(String startTooltip) {
+        if (startTooltip == null || startTooltip.isBlank()) {
+            return "满足";
+        }
+
+        if (startTooltip.contains("至少需要")) {
+            return "需要 1 猎人 + 1 逃亡者";
+        }
+        if (startTooltip.contains("只有 OP")) {
+            return "仅 OP 可开始";
+        }
+        if (startTooltip.contains("等待中")) {
+            return "仅等待中可开始";
+        }
+        return startTooltip;
+    }
+
+    private int wildcardToggleColumns(int width) {
+        if (width >= 460) {
+            return 3;
+        }
+        if (width >= 320) {
+            return 2;
+        }
+        return 1;
+    }
+
+    private int teamButtonColumns(int width) {
+        if (width >= 620) {
+            return 3;
+        }
+        if (width >= 380) {
+            return 2;
+        }
+        return 1;
+    }
+
     private String trim(String text, int width) {
         return textRenderer.trimToWidth(text, Math.max(10, width));
     }
 
+    private int withAlpha(int color, float alpha) {
+        int baseAlpha = color >>> 24;
+        int scaledAlpha = Math.max(0, Math.min(255, Math.round(baseAlpha * alpha)));
+        return (color & 0x00FFFFFF) | (scaledAlpha << 24);
+    }
+
+    private void renderFooterStatus(DrawContext context, Layout layout) {
+        List<StatusSegment> segments = footerSegments();
+        if (segments.isEmpty()) {
+            return;
+        }
+
+        int x = layout.contentX();
+        int y = layout.footerTop() + 8;
+        int right = layout.contentX() + layout.usableContentWidth();
+        for (int i = 0; i < segments.size(); i++) {
+            StatusSegment segment = segments.get(i);
+            if (x >= right) {
+                return;
+            }
+
+            String text = trim(segment.text(), right - x);
+            if (!text.isBlank()) {
+                context.drawText(textRenderer, Text.literal(text), x, y, segment.color(), false);
+                x += textRenderer.getWidth(text);
+            }
+
+            if (i < segments.size() - 1 && x + textRenderer.getWidth(" | ") < right) {
+                context.drawText(textRenderer, Text.literal(" | "), x, y, 0xFF6F7C86, false);
+                x += textRenderer.getWidth(" | ");
+            }
+        }
+    }
+
+    private List<StatusSegment> footerSegments() {
+        List<StatusSegment> segments = new ArrayList<>();
+        if (serverSync == null) {
+            if (!statusMessage.isBlank()) {
+                segments.add(new StatusSegment(statusMessage, statusKind.color));
+            }
+            return segments;
+        }
+
+        if (isConfigEditPage()) {
+            segments.add(new StatusSegment(canManage ? "配置模式：可修改" : "配置模式：只读", canManage ? 0xFF7FC2FF : 0xFF9FAAB4));
+            if (hasUnsavedChanges()) {
+                segments.add(new StatusSegment("未保存修改", 0xFFFFB347));
+            }
+            if (!statusMessage.isBlank() && (statusKind == StatusKind.ERROR || !hasUnsavedChanges())) {
+                segments.add(new StatusSegment(statusMessage, statusKind.color));
+            }
+            return segments;
+        }
+
+        if (!statusMessage.isBlank()) {
+            segments.add(new StatusSegment(statusMessage, statusKind.color));
+        }
+        return segments;
+    }
+
+    private boolean hasUnsavedChanges() {
+        return canManage && editableConfig != null && serverSync != null && !editableConfig.equals(serverSync.config());
+    }
+
+    private boolean canSaveConfig() {
+        return canManage
+                && editableConfig != null
+                && serverSync != null
+                && (hasUnsavedChanges() || hasVisibleInputChanges());
+    }
+
+    private boolean hasVisibleInputChanges() {
+        if (!canManage || editableConfig == null) {
+            return false;
+        }
+
+        for (Map.Entry<NumberField, TextFieldWidget> entry : numberFields.entrySet()) {
+            TextFieldWidget field = entry.getValue();
+            if (!field.active) {
+                continue;
+            }
+
+            String raw = field.getText().trim();
+            if (raw.isBlank()) {
+                return true;
+            }
+
+            try {
+                if (Integer.parseInt(raw) != getNumber(editableConfig, entry.getKey())) {
+                    return true;
+                }
+            } catch (NumberFormatException exception) {
+                return true;
+            }
+        }
+
+        for (Map.Entry<StringField, TextFieldWidget> entry : stringFields.entrySet()) {
+            TextFieldWidget field = entry.getValue();
+            if (field.active && !field.getText().trim().equals(getString(editableConfig, entry.getKey()))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasFocusedTextField() {
+        for (TextFieldWidget field : numberFields.values()) {
+            if (field.isFocused()) {
+                return true;
+            }
+        }
+
+        for (TextFieldWidget field : stringFields.values()) {
+            if (field.isFocused()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void ensureFocusedInputVisible(Layout layout) {
+        for (TextFieldWidget field : numberFields.values()) {
+            if (field.isFocused()) {
+                ensureVisible(layout, field.getY(), field.getHeight());
+                return;
+            }
+        }
+
+        for (TextFieldWidget field : stringFields.values()) {
+            if (field.isFocused()) {
+                ensureVisible(layout, field.getY(), field.getHeight());
+                return;
+            }
+        }
+    }
+
+    private void ensureVisible(Layout layout, int widgetY, int widgetHeight) {
+        int margin = 8;
+        if (widgetY < layout.viewportTop() + margin) {
+            targetScrollOffset -= layout.viewportTop() + margin - widgetY;
+        } else if (widgetY + widgetHeight > layout.viewportBottom() - margin) {
+            targetScrollOffset += widgetY + widgetHeight - (layout.viewportBottom() - margin);
+        }
+
+        updateMaxScroll(layout);
+        targetScrollOffset = clamp(targetScrollOffset, 0.0F, maxScroll);
+        rememberCurrentScroll();
+    }
+
     private Layout layout() {
-        int panelWidth = Math.min(720, Math.max(320, width - 24));
+        int panelWidth = Math.min(1120, Math.max(360, width - 24));
         if (panelWidth > width - 8) {
             panelWidth = Math.max(220, width - 8);
         }
 
-        int panelHeight = Math.min(390, Math.max(240, height - 24));
+        int panelHeight = Math.min(520, Math.max(260, height - 24));
         if (panelHeight > height - 8) {
             panelHeight = Math.max(200, height - 8);
         }
 
         int panelX = (width - panelWidth) / 2;
         int panelY = (height - panelHeight) / 2;
-        int navWidth = panelWidth < 520 ? 96 : 120;
-        int contentX = panelX + navWidth + 18;
+        int navWidth = panelWidth < 520 ? 92 : panelWidth < 760 ? 104 : 116;
+        int contentGap = panelWidth < 760 ? 12 : 16;
+        int rightPadding = panelWidth < 760 ? 10 : 12;
+        int contentX = panelX + navWidth + contentGap;
         int contentY = panelY + 48;
-        int contentWidth = panelX + panelWidth - contentX - 14;
-        int contentBottom = panelY + panelHeight - 66;
-        return new Layout(panelX, panelY, panelWidth, panelHeight, navWidth, contentX, contentY, contentWidth, contentBottom);
+        int contentWidth = panelX + panelWidth - contentX - rightPadding;
+        int footerHeight = 50;
+        int footerTop = panelY + panelHeight - footerHeight;
+        int viewportTop = contentY;
+        int viewportBottom = Math.max(viewportTop + 40, footerTop - 12);
+        int scrollBarX = contentX + contentWidth - 6;
+        return new Layout(
+                panelX,
+                panelY,
+                panelWidth,
+                panelHeight,
+                navWidth,
+                contentX,
+                contentY,
+                contentWidth,
+                viewportTop,
+                viewportBottom,
+                footerTop,
+                footerHeight,
+                SCROLL_BAR_RESERVE,
+                scrollBarX
+        );
+    }
+
+    private class CardBuilder {
+        private final Layout layout;
+        private final int x;
+        private final int y;
+        private final int width;
+        private int cursorY;
+        private int bottomY;
+        private boolean finished;
+
+        CardBuilder(Layout layout, int x, int y, int width, String title) {
+            this.layout = layout;
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.cursorY = contentStartY(y);
+            this.bottomY = cursorY;
+            addCardTitle(layout, title, x + CARD_PADDING_X, y + CARD_PADDING_TOP);
+        }
+
+        int width() {
+            return width;
+        }
+
+        void info(String label, String value, int valueColor) {
+            addInfoRow(layout, label, value, contentX(), cursorY, contentWidth(), valueColor);
+            advanceRow();
+        }
+
+        void number(NumberField field) {
+            number(field, canManage);
+        }
+
+        void number(NumberField field, boolean editable) {
+            addInputRow(layout, field, contentX(), cursorY, contentWidth(), editable);
+            advanceRow();
+        }
+
+        void coordinates(NumberField xField, NumberField yField, NumberField zField) {
+            int nextY = addCoordinateRow(layout, xField, yField, zField, contentX(), cursorY, contentWidth());
+            bottomY = Math.max(bottomY, nextY - ROW_GAP);
+            cursorY = nextY;
+        }
+
+        void numberPair(NumberField left, NumberField right) {
+            int contentWidth = contentWidth();
+            if (contentWidth < 420) {
+                number(left);
+                number(right);
+                return;
+            }
+
+            int gap = 12;
+            int fieldWidth = (contentWidth - gap) / 2;
+            addInputRow(layout, left, contentX(), cursorY, fieldWidth, canManage);
+            addInputRow(layout, right, contentX() + fieldWidth + gap, cursorY, fieldWidth, canManage);
+            advanceRow();
+        }
+
+        void string(StringField field) {
+            addInputRow(layout, field, contentX(), cursorY, contentWidth());
+            advanceRow();
+        }
+
+        void dropdown(DropdownField field) {
+            dropdown(field, canManage);
+        }
+
+        void dropdown(DropdownField field, boolean editable) {
+            addDropdownRow(layout, field, contentX(), cursorY, contentWidth(), editable);
+            advanceRow();
+        }
+
+        void booleanField(BooleanField field) {
+            addToggleRow(layout, field, contentX(), cursorY, contentWidth());
+            advanceRow();
+        }
+
+        void hint(String text) {
+            addHintText(layout, text, contentX(), cursorY + 2, contentWidth());
+            bottomY = Math.max(bottomY, cursorY + HINT_HEIGHT);
+            cursorY += HINT_HEIGHT + ROW_GAP;
+        }
+
+        void button(String title, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled, int maxWidth) {
+            buttonGrid(List.of(new ButtonSpec(title, action, variant, enabled)), 1, maxWidth);
+        }
+
+        void buttonGrid(List<ButtonSpec> buttons, int requestedColumns, int maxButtonWidth) {
+            int nextY = addButtonRow(layout, buttons, contentX(), cursorY, contentWidth(), requestedColumns, maxButtonWidth);
+            bottomY = Math.max(bottomY, nextY - ROW_GAP);
+            cursorY = nextY;
+        }
+
+        void gap(int height) {
+            cursorY += Math.max(0, height);
+            bottomY = Math.max(bottomY, cursorY);
+        }
+
+        void toggleGrid(ToggleField[] fields, int requestedColumns) {
+            int gap = 8;
+            int columns = Math.max(1, Math.min(requestedColumns, fields.length));
+            while (columns > 1 && (contentWidth() - (columns - 1) * gap) / columns < 118) {
+                columns--;
+            }
+
+            int itemWidth = Math.min(WILDCARD_TOGGLE_MAX_WIDTH, Math.max(80, (contentWidth() - (columns - 1) * gap) / columns));
+            int gridWidth = itemWidth * columns + (columns - 1) * gap;
+            int gridX = contentX() + Math.max(0, (contentWidth() - gridWidth) / 2);
+            int rows = (fields.length + columns - 1) / columns;
+            for (int i = 0; i < fields.length; i++) {
+                ToggleField field = fields[i];
+                int column = i % columns;
+                int row = i / columns;
+                addWildcardToggleTile(
+                        layout,
+                        field,
+                        gridX + column * (itemWidth + gap),
+                        cursorY + row * (WILDCARD_TOGGLE_HEIGHT + gap),
+                        itemWidth,
+                        WILDCARD_TOGGLE_HEIGHT
+                );
+            }
+            int nextY = cursorY + rows * WILDCARD_TOGGLE_HEIGHT + (rows - 1) * gap + ROW_GAP;
+            bottomY = Math.max(bottomY, nextY - ROW_GAP);
+            cursorY = nextY;
+        }
+
+        int height() {
+            return Math.max(CARD_PADDING_TOP + CARD_TITLE_HEIGHT + CARD_PADDING_BOTTOM, bottomY - y + CARD_PADDING_BOTTOM);
+        }
+
+        int finish() {
+            return finish(height());
+        }
+
+        int finish(int forcedHeight) {
+            if (!finished) {
+                drawCardBorder(layout, x, y, width, forcedHeight);
+                finished = true;
+            }
+            return y + forcedHeight;
+        }
+
+        private int contentX() {
+            return x + CARD_PADDING_X;
+        }
+
+        private int contentWidth() {
+            return Math.max(40, width - CARD_PADDING_X * 2);
+        }
+
+        private void advanceRow() {
+            bottomY = Math.max(bottomY, rowContentBottom(cursorY));
+            cursorY = nextRowY(cursorY);
+        }
+    }
+
+    @FunctionalInterface
+    private interface CardBody {
+        void build(CardBuilder card);
+    }
+
+    private record ButtonSpec(String title, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled, String tooltip) {
+        ButtonSpec(String title, ButtonWidget.PressAction action, ButtonVariant variant, boolean enabled) {
+            this(title, action, variant, enabled, "");
+        }
     }
 
     private enum Page {
-        GAME("游戏"),
-        TEAM("队伍"),
-        CONFIG("配置"),
-        DEBUG("调试");
+        GAME("游戏状态", "查看当前对局、队伍、身份和外卡状态"),
+        TEAM("队伍管理", "选择你的阵营，查看双方人数"),
+        BASIC("基础规则", "设置游戏的基本时间、边界和对局参数"),
+        VICTORY("胜利规则", "设置逃亡者与猎人的胜利方式"),
+        RESPAWN("生命复活", "设置双方生命数、复活模式和复活时间"),
+        WILDCARD("外卡规则", "设置外卡触发间隔、启用状态和具体外卡"),
+        DEBUG("调试操作", "执行调试命令开启后的测试操作");
 
         private final String label;
+        private final String description;
 
-        Page(String label) {
+        Page(String label, String description) {
             this.label = label;
+            this.description = description;
         }
     }
 
     private enum NumberField {
-        PREPARING_SECONDS("准备时间"),
-        ENDING_SECONDS("结算时间"),
-        COMPASS_UPDATE_SECONDS("指南针刷新"),
-        HUNTER_RESPAWN_SECONDS("猎人复活"),
-        WILDCARD_INTERVAL_SECONDS("外卡间隔"),
-        WILDCARD_DURATION_SECONDS("外卡持续"),
-        ACTION_BAR_INTERVAL_SECONDS("状态栏刷新"),
-        HUNTER_RADAR_INTERVAL_SECONDS("雷达播报"),
-        SUPPLY_DROP_INTERVAL_SECONDS("空投间隔");
+        PREPARING_SECONDS("准备时间", "秒", 1),
+        ENDING_SECONDS("结算时间", "秒", 1),
+        COMPASS_UPDATE_SECONDS("指南针刷新", "秒", 1),
+        HUNTER_RESPAWN_SECONDS("猎人复活", "秒", 1),
+        WILDCARD_INTERVAL_SECONDS("外卡间隔", "秒", 1),
+        WILDCARD_DURATION_SECONDS("外卡持续", "秒", 1),
+        ACTION_BAR_INTERVAL_SECONDS("状态栏刷新", "秒", 1),
+        HUNTER_RADAR_INTERVAL_SECONDS("雷达播报", "秒", 1),
+        SUPPLY_DROP_INTERVAL_SECONDS("空投间隔", "秒", 1),
+        HUNTER_PREPARE_BOUNDARY_RADIUS("准备区域半径", "格", 1),
+        HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE("边界警告距离", "格", 0),
+        SURVIVE_TIME_SECONDS("存活时间", "秒", 1),
+        TARGET_X("目标 X", "", Integer.MIN_VALUE),
+        TARGET_Y("目标 Y", "", Integer.MIN_VALUE),
+        TARGET_Z("目标 Z", "", Integer.MIN_VALUE),
+        TARGET_RADIUS("目标半径", "格", 1),
+        TARGET_ITEM_COUNT("目标物品数量", "个", 1),
+        HUNTER_LIVES("猎人生命数", "条", 0),
+        RUNNER_LIVES("逃亡者生命数", "条", 1),
+        RUNNER_RESPAWN_SECONDS("逃亡者复活", "秒", 1),
+        HUNTER_RUNNER_KILL_TARGET("击杀目标", "次", 1);
+
+        private final String label;
+        private final String unit;
+        private final int minValue;
+
+        NumberField(String label, String unit, int minValue) {
+            this.label = label;
+            this.unit = unit;
+            this.minValue = minValue;
+        }
+
+        private boolean allowsNegative() {
+            return minValue < 0;
+        }
+    }
+
+    private enum StringField {
+        TARGET_ITEM_ID("目标物品 ID", 128);
+
+        private final String label;
+        private final int maxLength;
+
+        StringField(String label, int maxLength) {
+            this.label = label;
+            this.maxLength = maxLength;
+        }
+    }
+
+    private enum DropdownField {
+        RUNNER_VICTORY_TYPE("逃亡者胜利条件", List.of(
+                option(RunnerVictoryType.DRAGON.name(), RunnerVictoryType.DRAGON.getDisplayName()),
+                option(RunnerVictoryType.SURVIVE_TIME.name(), RunnerVictoryType.SURVIVE_TIME.getDisplayName()),
+                option(RunnerVictoryType.REACH_LOCATION.name(), RunnerVictoryType.REACH_LOCATION.getDisplayName()),
+                option(RunnerVictoryType.COLLECT_ITEM.name(), RunnerVictoryType.COLLECT_ITEM.getDisplayName())
+        )),
+        HUNTER_VICTORY_TYPE("猎人胜利方式", List.of(
+                option(HunterVictoryType.RUNNERS_OUT.name(), "淘汰逃亡者"),
+                option(HunterVictoryType.RUNNER_KILL_COUNT.name(), "达到击杀数")
+        )),
+        HUNTER_RESPAWN_MODE("猎人复活模式", List.of(
+                option(RespawnMode.INFINITE.name(), "无限复活"),
+                option(RespawnMode.LIMITED_LIVES.name(), "有限生命"),
+                option(RespawnMode.NO_RESPAWN.name(), "不复活")
+        )),
+        RUNNER_RESPAWN_MODE("逃亡者复活模式", List.of(
+                option(RespawnMode.INFINITE.name(), "无限复活"),
+                option(RespawnMode.LIMITED_LIVES.name(), "有限生命"),
+                option(RespawnMode.NO_RESPAWN.name(), "不复活")
+        )),
+        RUNNER_TEAM_LOSS_MODE("逃亡者失败规则", List.of(
+                option(RunnerTeamLossMode.ANY_RUNNER_OUT.name(), "任意出局即失败"),
+                option(RunnerTeamLossMode.ALL_RUNNERS_OUT.name(), "全员出局才失败")
+        )),
+        TARGET_DIMENSION("目标维度", List.of(
+                option("minecraft:overworld", "主世界"),
+                option("minecraft:the_nether", "下界"),
+                option("minecraft:the_end", "末地")
+        ));
+
+        private final String label;
+        private final List<DropdownWidget.Option> options;
+
+        DropdownField(String label, List<DropdownWidget.Option> options) {
+            this.label = label;
+            this.options = options;
+        }
+    }
+
+    private static DropdownWidget.Option option(String value, String displayName) {
+        return new DropdownWidget.Option(value, displayName);
+    }
+
+    private enum BooleanField {
+        HUNTER_PREPARE_BOUNDARY_ENABLED("启用猎人准备区域");
 
         private final String label;
 
-        NumberField(String label) {
+        BooleanField(String label) {
             this.label = label;
         }
     }
@@ -791,6 +2700,7 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private enum ButtonVariant {
+        PRIMARY,
         NORMAL,
         SELECTED,
         DANGER,
@@ -799,10 +2709,47 @@ public class HunterWildcardConfigScreen extends Screen {
         DISABLED
     }
 
-    private record Layout(int panelX, int panelY, int panelWidth, int panelHeight, int navWidth, int contentX, int contentY, int contentWidth, int contentBottom) {
-        int contentHeight() {
-            return contentBottom - contentY;
+    private enum StatusKind {
+        INFO(0xFFFFD966),
+        SUCCESS(0xFF77E287),
+        ERROR(0xFFFF8A8A);
+
+        private final int color;
+
+        StatusKind(int color) {
+            this.color = color;
         }
+    }
+
+    private record Layout(
+            int panelX,
+            int panelY,
+            int panelWidth,
+            int panelHeight,
+            int navWidth,
+            int contentX,
+            int contentY,
+            int contentWidth,
+            int viewportTop,
+            int viewportBottom,
+            int footerTop,
+            int footerHeight,
+            int scrollBarReserve,
+            int scrollBarX
+    ) {
+        int usableContentWidth() {
+            return Math.max(80, contentWidth - scrollBarReserve);
+        }
+
+        int viewportHeight() {
+            return viewportBottom - viewportTop;
+        }
+    }
+
+    private record StatusSegment(String text, int color) {
+    }
+
+    private record StatusBlock(String label, String value, int color) {
     }
 
     private record Label(String text, int x, int y, int color, boolean shadow, int width) {
@@ -836,6 +2783,9 @@ public class HunterWildcardConfigScreen extends Screen {
         protected void drawIcon(DrawContext context, int mouseX, int mouseY, float delta) {
             ButtonVariant renderedVariant = active || variant == ButtonVariant.SELECTED ? variant : ButtonVariant.DISABLED;
             Palette palette = palette(renderedVariant, isHovered());
+            if (isHovered() && !description.isBlank()) {
+                setHoverTooltip(description, mouseX, mouseY);
+            }
             int x = getX();
             int y = getY();
             int width = getWidth();
@@ -869,10 +2819,11 @@ public class HunterWildcardConfigScreen extends Screen {
 
         private Palette palette(ButtonVariant variant, boolean hovered) {
             return switch (variant) {
+                case PRIMARY -> new Palette(hovered ? 0xCC246C86 : 0xAA1F536A, hovered ? 0xFF7FE7FF : 0xFF54B8D6, 0xFF7FE7FF, 0xFFFFFFFF, 0xFFD7F8FF);
                 case SELECTED -> new Palette(0xAA345B78, 0xFF7FC2FF, 0xFF7FC2FF, 0xFFFFFFFF, 0xFFD7ECFF);
                 case DANGER -> new Palette(hovered ? 0xAA6D3434 : 0x8845292F, hovered ? 0xFFFF8A8A : 0xFFD76474, 0xFFFF8A8A, 0xFFFFFFFF, 0xFFFFC2C8);
                 case TOGGLE_ON -> new Palette(hovered ? 0xAA2E5C49 : 0x88324B3F, hovered ? 0xFF77E287 : 0xFF55B978, 0xFF77E287, 0xFFFFFFFF, 0xFFD7F8E1);
-                case TOGGLE_OFF -> new Palette(hovered ? 0xAA6D3434 : 0x8845292F, hovered ? 0xFFFF8A8A : 0xFFD76474, 0xFFFF8A8A, 0xFFFFFFFF, 0xFFFFC2C8);
+                case TOGGLE_OFF -> new Palette(hovered ? 0xAA3A4652 : 0x88303A46, hovered ? 0xFF8A98A6 : 0xFF59636C, 0xFF8A98A6, 0xFFE1E6EB, 0xFF9FAAB4);
                 case DISABLED -> new Palette(0x66303A46, 0xFF59636C, 0xFF59636C, 0xFF9FAAB4, 0xFF9FAAB4);
                 default -> new Palette(hovered ? 0xAA3E5570 : 0x88303A46, hovered ? 0xFF74B6FF : 0xFF4C5A66, 0xFF74B6FF, 0xFFFFFFFF, 0xFFC9D4DE);
             };

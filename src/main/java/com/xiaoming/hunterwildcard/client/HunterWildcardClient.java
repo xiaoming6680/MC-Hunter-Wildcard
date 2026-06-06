@@ -12,6 +12,8 @@ public class HunterWildcardClient implements ClientModInitializer {
         HunterWildcardPackets.registerPayloadTypes();
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_SYNC_CONFIG, (payload, context) ->
                 context.client().execute(() -> HunterWildcardConfigScreen.receiveSync(payload)));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_OPERATION_RESULT, (payload, context) ->
+                context.client().execute(() -> HunterWildcardConfigScreen.receiveOperationResult(payload)));
         HunterWildcardKeyBindings.register();
     }
 }

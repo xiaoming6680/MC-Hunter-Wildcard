@@ -21,6 +21,8 @@ public class HunterWildcardPackets {
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "request_config"));
     public static final CustomPayload.Id<SyncConfigPayload> S2C_SYNC_CONFIG =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "sync_config"));
+    public static final CustomPayload.Id<OperationResultPayload> S2C_OPERATION_RESULT =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "operation_result"));
     public static final CustomPayload.Id<UpdateConfigPayload> C2S_UPDATE_CONFIG =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "update_config"));
     public static final CustomPayload.Id<ReloadConfigPayload> C2S_RELOAD_CONFIG =
@@ -48,6 +50,7 @@ public class HunterWildcardPackets {
 
         PayloadTypeRegistry.playC2S().register(C2S_REQUEST_CONFIG, RequestConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_SYNC_CONFIG, SyncConfigPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_OPERATION_RESULT, OperationResultPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_UPDATE_CONFIG, UpdateConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_RELOAD_CONFIG, ReloadConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_DEBUG_ACTION, DebugActionPayload.CODEC);
@@ -83,6 +86,22 @@ public class HunterWildcardPackets {
         }
     }
 
+    private static void sendOperationResult(ServerPlayerEntity player, boolean success, String message) {
+        if (ServerPlayNetworking.canSend(player, S2C_OPERATION_RESULT)) {
+            ServerPlayNetworking.send(player, new OperationResultPayload(success, message));
+        }
+    }
+
+    private static void sendSyncAndResult(ServerPlayerEntity player, boolean success, String message) {
+        sendSync(player);
+        sendOperationResult(player, success, message);
+    }
+
+    private static void syncAllAndResult(ServerPlayerEntity player, boolean success, String message) {
+        syncAll(player.getEntityWorld().getServer());
+        sendOperationResult(player, success, message);
+    }
+
     private static SyncConfigPayload createSyncPayload(ServerPlayerEntity player) {
         GameManager manager = GameManager.getInstance();
         String activeWildcard = manager.getWildcardManager().getActiveRuleName();
@@ -101,6 +120,9 @@ public class HunterWildcardPackets {
                 playerRole == null ? "未加入" : playerRole.getDisplayName(),
                 playerRole != null,
                 manager.getWildcardManager().getActiveRule() != null,
+                ticksToSeconds(manager.getPhaseRemainingTicks()),
+                ticksToSeconds(manager.getActiveWildcardRemainingTicks()),
+                ticksToSeconds(manager.getTicksUntilNextWildcard()),
                 canManage,
                 canManage && manager.isDebugMenuEnabled(player),
                 ConfigSnapshot.from(manager.getConfig())
@@ -110,100 +132,176 @@ public class HunterWildcardPackets {
     private static void handleUpdateConfig(ServerPlayerEntity player, ConfigSnapshot snapshot) {
         if (!HunterWildcardCommand.canManageGame(player.getCommandSource())) {
             reject(player);
-            sendSync(player);
             return;
         }
 
         GameManager manager = GameManager.getInstance();
         manager.applyConfig(snapshot.toConfig());
         if (manager.saveConfig()) {
-            manager.getMessageManager().direct(player, "配置已保存。");
+            String message = "配置已保存。";
+            manager.getMessageManager().direct(player, message);
+            syncAllAndResult(player, true, message);
         } else {
-            player.sendMessage(Text.literal("保存配置失败，请检查服务器日志。"), false);
+            String message = "保存配置失败，请检查服务器日志。";
+            player.sendMessage(Text.literal(message), false);
+            syncAllAndResult(player, false, message);
         }
-        syncAll(player.getEntityWorld().getServer());
     }
 
     private static void handleReloadConfig(ServerPlayerEntity player) {
         if (!HunterWildcardCommand.canManageGame(player.getCommandSource())) {
             reject(player);
-            sendSync(player);
             return;
         }
 
         GameManager manager = GameManager.getInstance();
         manager.reloadConfig();
-        manager.getMessageManager().direct(player, "配置已重新加载。");
-        syncAll(player.getEntityWorld().getServer());
+        String message = "配置已重新加载。";
+        manager.getMessageManager().direct(player, message);
+        syncAllAndResult(player, true, message);
     }
 
     private static void handleDebugAction(ServerPlayerEntity player, DebugAction action) {
         if (!HunterWildcardCommand.canManageGame(player.getCommandSource())) {
             reject(player);
-            sendSync(player);
             return;
         }
 
         GameManager manager = GameManager.getInstance();
         if (!manager.isDebugMenuEnabled(player)) {
-            manager.getMessageManager().direct(player, "请先使用 /hw ts true 打开调试页。");
-            sendSync(player);
+            fail(player, "请先使用 /hw ts true 打开调试页。");
             return;
         }
 
         switch (action) {
-            case START_GAME -> manager.start(player.getCommandSource());
-            case STOP_GAME -> manager.stop(player.getCommandSource());
-            case ROLL_WILDCARD -> manager.rollWildcard(player.getCommandSource());
-            case STOP_WILDCARD -> manager.debugStopWildcard(player.getCommandSource());
+            case START_GAME -> {
+                String error = validateStartGame(manager);
+                if (error != null) {
+                    fail(player, error);
+                    return;
+                }
+                manager.start(player.getCommandSource());
+                syncAllAndResult(player, true, "游戏已开始准备。");
+            }
+            case STOP_GAME -> {
+                boolean hadGame = canStopGame(manager);
+                manager.stop(player.getCommandSource());
+                syncAllAndResult(player, hadGame, hadGame ? "游戏已停止。" : "当前没有正在进行的猎人外卡游戏。");
+            }
+            case ROLL_WILDCARD -> {
+                if (manager.getState() != GameState.RUNNING) {
+                    fail(player, "只有 RUNNING 阶段可以手动触发外卡。");
+                    return;
+                }
+                manager.rollWildcard(player.getCommandSource());
+                String activeRule = manager.getWildcardManager().getActiveRuleName();
+                syncAllAndResult(player, activeRule != null, activeRule == null ? "没有可用外卡。" : "已随机触发外卡: " + activeRule);
+            }
+            case STOP_WILDCARD -> {
+                boolean hadWildcard = manager.getWildcardManager().getActiveRule() != null;
+                manager.debugStopWildcard(player.getCommandSource());
+                syncAllAndResult(player, hadWildcard, hadWildcard ? "已停止当前外卡。" : "当前没有正在运行的外卡。");
+            }
         }
-        syncAll(player.getEntityWorld().getServer());
     }
 
     private static void handleTestWildcard(ServerPlayerEntity player, String wildcardName) {
         if (!HunterWildcardCommand.canManageGame(player.getCommandSource())) {
             reject(player);
-            sendSync(player);
             return;
         }
 
         GameManager manager = GameManager.getInstance();
         if (!manager.isDebugMenuEnabled(player)) {
-            manager.getMessageManager().direct(player, "请先使用 /hw ts true 打开调试页。");
-            sendSync(player);
+            fail(player, "请先使用 /hw ts true 打开调试页。");
             return;
         }
 
         manager.testWildcard(player.getCommandSource(), wildcardName, player);
-        syncAll(player.getEntityWorld().getServer());
+        String activeRule = manager.getWildcardManager().getActiveRuleName();
+        boolean success = activeRule != null && activeRule.equals(wildcardName);
+        syncAllAndResult(player, success, success ? "已测试触发外卡: " + wildcardName : "该外卡不可用或已关闭: " + wildcardName);
     }
 
     private static void handleTeamAction(ServerPlayerEntity player, TeamAction action) {
         GameManager manager = GameManager.getInstance();
+        PlayerRole previousRole = manager.getTeamManager().getRole(player);
+        boolean canJoin = manager.getState() != GameState.RUNNING && manager.getState() != GameState.ENDING;
         switch (action) {
             case JOIN_HUNTER -> manager.join(player, PlayerRole.HUNTER);
             case JOIN_RUNNER -> manager.join(player, PlayerRole.RUNNER);
             case LEAVE -> manager.leave(player);
         }
-        syncAll(player.getEntityWorld().getServer());
+        switch (action) {
+            case JOIN_HUNTER -> syncAllAndResult(player, canJoin, canJoin ? "已加入猎人队伍。" : "游戏已经开始，当前不能加入队伍。");
+            case JOIN_RUNNER -> syncAllAndResult(player, canJoin, canJoin ? "已加入逃亡者队伍。" : "游戏已经开始，当前不能加入队伍。");
+            case LEAVE -> syncAllAndResult(player, previousRole != null, previousRole == null ? "你当前不在游戏队伍中。" : "已离开 " + previousRole.getDisplayName() + " 队伍。");
+        }
     }
 
     private static void handleGameAction(ServerPlayerEntity player, GameAction action) {
         if (!HunterWildcardCommand.canManageGame(player.getCommandSource())) {
             reject(player);
-            sendSync(player);
             return;
         }
 
         GameManager manager = GameManager.getInstance();
-        if (action == GameAction.START_GAME) {
-            manager.start(player.getCommandSource());
+        switch (action) {
+            case START_GAME -> {
+                String error = validateStartGame(manager);
+                if (error != null) {
+                    fail(player, error);
+                    return;
+                }
+                manager.start(player.getCommandSource());
+                syncAllAndResult(player, true, "游戏已开始准备。");
+            }
+            case STOP_GAME -> {
+                boolean hadGame = canStopGame(manager);
+                manager.stop(player.getCommandSource());
+                syncAllAndResult(player, hadGame, hadGame ? "游戏已停止。" : "当前没有正在进行的猎人外卡游戏。");
+            }
+            case ROLL_WILDCARD -> {
+                if (manager.getState() != GameState.RUNNING) {
+                    fail(player, "只有 RUNNING 阶段可以手动触发外卡。");
+                    return;
+                }
+                manager.rollWildcard(player.getCommandSource());
+                String activeRule = manager.getWildcardManager().getActiveRuleName();
+                syncAllAndResult(player, activeRule != null, activeRule == null ? "没有可用外卡。" : "已随机触发外卡: " + activeRule);
+            }
         }
-        syncAll(player.getEntityWorld().getServer());
     }
 
     private static void reject(ServerPlayerEntity player) {
-        GameManager.getInstance().getMessageManager().direct(player, "你没有权限执行该操作。");
+        fail(player, "你没有权限执行该操作。");
+    }
+
+    private static void fail(ServerPlayerEntity player, String message) {
+        GameManager.getInstance().getMessageManager().direct(player, message);
+        sendSyncAndResult(player, false, message);
+    }
+
+    private static String validateStartGame(GameManager manager) {
+        if (manager.getState() != GameState.WAITING) {
+            return "游戏已经开始或正在结束。";
+        }
+
+        if (manager.getTeamManager().count(PlayerRole.HUNTER) == 0 || manager.getTeamManager().count(PlayerRole.RUNNER) == 0) {
+            return "至少需要 1 名猎人和 1 名逃亡者。";
+        }
+
+        return null;
+    }
+
+    private static boolean canStopGame(GameManager manager) {
+        return manager.getState() != GameState.WAITING
+                || manager.getTeamManager().count(PlayerRole.HUNTER) > 0
+                || manager.getTeamManager().count(PlayerRole.RUNNER) > 0;
+    }
+
+    private static int ticksToSeconds(int ticks) {
+        return ticks < 0 ? -1 : Math.max(0, (ticks + 19) / 20);
     }
 
     public enum DebugAction {
@@ -220,7 +318,9 @@ public class HunterWildcardPackets {
     }
 
     public enum GameAction {
-        START_GAME
+        START_GAME,
+        STOP_GAME,
+        ROLL_WILDCARD
     }
 
     public record ConfigSnapshot(
@@ -233,6 +333,32 @@ public class HunterWildcardPackets {
             int actionBarIntervalSeconds,
             int hunterRadarIntervalSeconds,
             int supplyDropIntervalSeconds,
+            boolean hunterPrepareBoundaryEnabled,
+            int hunterPrepareBoundaryRadius,
+            int hunterPrepareBoundaryWarnDistance,
+            String runnerVictoryType,
+            String runnerWinMode,
+            boolean enableDragonWin,
+            boolean enableSurviveTimeWin,
+            int surviveTimeSeconds,
+            boolean enableReachLocationWin,
+            String targetDimension,
+            int targetX,
+            int targetY,
+            int targetZ,
+            int targetRadius,
+            boolean enableCollectItemWin,
+            String targetItemId,
+            int targetItemCount,
+            String hunterRespawnMode,
+            int hunterLives,
+            String runnerRespawnMode,
+            int runnerLives,
+            int runnerRespawnSeconds,
+            String runnerTeamLossMode,
+            String hunterVictoryType,
+            boolean hunterWinByRunnerKillsEnabled,
+            int hunterRunnerKillTarget,
             boolean enableSpeedRush,
             boolean enableFeatherweight,
             boolean enableGlowing,
@@ -252,6 +378,32 @@ public class HunterWildcardPackets {
                     buf.readInt(),
                     buf.readInt(),
                     buf.readInt(),
+                    buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readString(32),
+                    buf.readString(32),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readString(128),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readString(128),
+                    buf.readInt(),
+                    buf.readString(32),
+                    buf.readInt(),
+                    buf.readString(32),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readString(32),
+                    buf.readString(32),
+                    buf.readBoolean(),
                     buf.readInt(),
                     buf.readBoolean(),
                     buf.readBoolean(),
@@ -274,6 +426,32 @@ public class HunterWildcardPackets {
             buf.writeInt(actionBarIntervalSeconds);
             buf.writeInt(hunterRadarIntervalSeconds);
             buf.writeInt(supplyDropIntervalSeconds);
+            buf.writeBoolean(hunterPrepareBoundaryEnabled);
+            buf.writeInt(hunterPrepareBoundaryRadius);
+            buf.writeInt(hunterPrepareBoundaryWarnDistance);
+            buf.writeString(runnerVictoryType);
+            buf.writeString(runnerWinMode);
+            buf.writeBoolean(enableDragonWin);
+            buf.writeBoolean(enableSurviveTimeWin);
+            buf.writeInt(surviveTimeSeconds);
+            buf.writeBoolean(enableReachLocationWin);
+            buf.writeString(targetDimension);
+            buf.writeInt(targetX);
+            buf.writeInt(targetY);
+            buf.writeInt(targetZ);
+            buf.writeInt(targetRadius);
+            buf.writeBoolean(enableCollectItemWin);
+            buf.writeString(targetItemId);
+            buf.writeInt(targetItemCount);
+            buf.writeString(hunterRespawnMode);
+            buf.writeInt(hunterLives);
+            buf.writeString(runnerRespawnMode);
+            buf.writeInt(runnerLives);
+            buf.writeInt(runnerRespawnSeconds);
+            buf.writeString(runnerTeamLossMode);
+            buf.writeString(hunterVictoryType);
+            buf.writeBoolean(hunterWinByRunnerKillsEnabled);
+            buf.writeInt(hunterRunnerKillTarget);
             buf.writeBoolean(enableSpeedRush);
             buf.writeBoolean(enableFeatherweight);
             buf.writeBoolean(enableGlowing);
@@ -295,6 +473,32 @@ public class HunterWildcardPackets {
                     config.actionBarIntervalSeconds,
                     config.hunterRadarIntervalSeconds,
                     config.supplyDropIntervalSeconds,
+                    config.hunterPrepareBoundaryEnabled,
+                    config.hunterPrepareBoundaryRadius,
+                    config.hunterPrepareBoundaryWarnDistance,
+                    config.runnerVictoryType,
+                    config.runnerWinMode,
+                    config.enableDragonWin,
+                    config.enableSurviveTimeWin,
+                    config.surviveTimeSeconds,
+                    config.enableReachLocationWin,
+                    config.targetDimension,
+                    config.targetX,
+                    config.targetY,
+                    config.targetZ,
+                    config.targetRadius,
+                    config.enableCollectItemWin,
+                    config.targetItemId,
+                    config.targetItemCount,
+                    config.hunterRespawnMode,
+                    config.hunterLives,
+                    config.runnerRespawnMode,
+                    config.runnerLives,
+                    config.runnerRespawnSeconds,
+                    config.runnerTeamLossMode,
+                    config.hunterVictoryType,
+                    config.hunterWinByRunnerKillsEnabled,
+                    config.hunterRunnerKillTarget,
                     config.enableSpeedRush,
                     config.enableFeatherweight,
                     config.enableGlowing,
@@ -317,6 +521,32 @@ public class HunterWildcardPackets {
             config.actionBarIntervalSeconds = actionBarIntervalSeconds;
             config.hunterRadarIntervalSeconds = hunterRadarIntervalSeconds;
             config.supplyDropIntervalSeconds = supplyDropIntervalSeconds;
+            config.hunterPrepareBoundaryEnabled = hunterPrepareBoundaryEnabled;
+            config.hunterPrepareBoundaryRadius = hunterPrepareBoundaryRadius;
+            config.hunterPrepareBoundaryWarnDistance = hunterPrepareBoundaryWarnDistance;
+            config.runnerVictoryType = runnerVictoryType;
+            config.runnerWinMode = runnerWinMode;
+            config.enableDragonWin = enableDragonWin;
+            config.enableSurviveTimeWin = enableSurviveTimeWin;
+            config.surviveTimeSeconds = surviveTimeSeconds;
+            config.enableReachLocationWin = enableReachLocationWin;
+            config.targetDimension = targetDimension;
+            config.targetX = targetX;
+            config.targetY = targetY;
+            config.targetZ = targetZ;
+            config.targetRadius = targetRadius;
+            config.enableCollectItemWin = enableCollectItemWin;
+            config.targetItemId = targetItemId;
+            config.targetItemCount = targetItemCount;
+            config.hunterRespawnMode = hunterRespawnMode;
+            config.hunterLives = hunterLives;
+            config.runnerRespawnMode = runnerRespawnMode;
+            config.runnerLives = runnerLives;
+            config.runnerRespawnSeconds = runnerRespawnSeconds;
+            config.runnerTeamLossMode = runnerTeamLossMode;
+            config.hunterVictoryType = hunterVictoryType;
+            config.hunterWinByRunnerKillsEnabled = hunterWinByRunnerKillsEnabled;
+            config.hunterRunnerKillTarget = hunterRunnerKillTarget;
             config.enableSpeedRush = enableSpeedRush;
             config.enableFeatherweight = enableFeatherweight;
             config.enableGlowing = enableGlowing;
@@ -355,6 +585,9 @@ public class HunterWildcardPackets {
             String playerRole,
             boolean playerInTeam,
             boolean activeWildcardRunning,
+            int phaseRemainingSeconds,
+            int activeWildcardRemainingSeconds,
+            int nextWildcardSeconds,
             boolean canManage,
             boolean debugPageEnabled,
             ConfigSnapshot config
@@ -370,6 +603,9 @@ public class HunterWildcardPackets {
             buf.writeString(playerRole);
             buf.writeBoolean(playerInTeam);
             buf.writeBoolean(activeWildcardRunning);
+            buf.writeInt(phaseRemainingSeconds);
+            buf.writeInt(activeWildcardRemainingSeconds);
+            buf.writeInt(nextWildcardSeconds);
             buf.writeBoolean(canManage);
             buf.writeBoolean(debugPageEnabled);
             config.write(buf);
@@ -384,6 +620,9 @@ public class HunterWildcardPackets {
                     buf.readString(64),
                     buf.readBoolean(),
                     buf.readBoolean(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
                     buf.readBoolean(),
                     buf.readBoolean(),
                     ConfigSnapshot.fromBuf(buf)
@@ -393,6 +632,25 @@ public class HunterWildcardPackets {
         @Override
         public Id<? extends CustomPayload> getId() {
             return S2C_SYNC_CONFIG;
+        }
+    }
+
+    public record OperationResultPayload(boolean success, String message) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, OperationResultPayload> CODEC =
+                PacketCodec.of(OperationResultPayload::write, OperationResultPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeBoolean(success);
+            buf.writeString(message);
+        }
+
+        private static OperationResultPayload read(RegistryByteBuf buf) {
+            return new OperationResultPayload(buf.readBoolean(), buf.readString(256));
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_OPERATION_RESULT;
         }
     }
 
