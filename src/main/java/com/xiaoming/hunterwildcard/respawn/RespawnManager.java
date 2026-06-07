@@ -4,9 +4,11 @@ import com.xiaoming.hunterwildcard.compass.CompassTracker;
 import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.game.HunterVictoryType;
+import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.world.GameMode;
 
 import java.util.HashMap;
@@ -32,37 +34,52 @@ public class RespawnManager {
         }
     }
 
-    public DeathOutcome onPlayerDeath(GameContext context, ServerPlayerEntity player, PlayerRole role, boolean killedByHunter) {
+    public DeathOutcome onPlayerDeath(GameContext context, ServerPlayerEntity player, PlayerRole role, ServerPlayerEntity hunterKiller) {
         if (role == null) {
             return DeathOutcome.none();
         }
 
         ModConfig config = context.getConfig();
+        boolean killedByHunter = hunterKiller != null;
+        String deathPrefix = deathPrefix(player, role, hunterKiller, config);
         if (role == PlayerRole.RUNNER && killedByHunter) {
             runnerKillCount++;
+            if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
+                int remainingKills = Math.max(0, config.hunterRunnerKillTarget - runnerKillCount);
+                HunterWildcardPackets.sendHunterKillFeedback(
+                        context,
+                        hunterKiller.getName().getString(),
+                        player.getName().getString(),
+                        remainingKills,
+                        runnerKillCount,
+                        config.hunterRunnerKillTarget
+                );
+            }
             if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT
                     && runnerKillCount >= config.hunterRunnerKillTarget) {
-                return DeathOutcome.end("猎人累计击杀逃亡者达到 " + config.hunterRunnerKillTarget + " 次，猎人阵营获胜。");
+                return DeathOutcome.messageAndEnd(deathPrefix + "。", "猎人累计击杀逃亡者达到 " + config.hunterRunnerKillTarget + " 次，猎人阵营获胜。");
+            }
+            if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
+                announceKillCountMilestone(context, config.hunterRunnerKillTarget - runnerKillCount);
             }
         }
 
         RespawnMode mode = modeFor(role, config);
         if (mode == RespawnMode.INFINITE) {
             scheduleRespawn(player, respawnTicksFor(role, config));
-            return DeathOutcome.message(role.getDisplayName() + " " + player.getName().getString()
-                    + " 死亡，将在 " + respawnSecondsFor(role, config) + " 秒后复活。");
+            return DeathOutcome.message(deathPrefix + "，将在 " + respawnSecondsFor(role, config) + " 秒后复活。");
         }
 
         int livesAfterDeath = mode == RespawnMode.NO_RESPAWN ? 0 : decrementLife(player, role, config);
         if (livesAfterDeath > 0) {
             scheduleRespawn(player, respawnTicksFor(role, config));
-            return DeathOutcome.message(role.getDisplayName() + " " + player.getName().getString()
-                    + " 死亡，剩余生命 " + livesAfterDeath
+            return DeathOutcome.message(deathPrefix
+                    + "，剩余生命 " + livesAfterDeath
                     + "，将在 " + respawnSecondsFor(role, config) + " 秒后复活。");
         }
 
         markOut(player);
-        String outMessage = role.getDisplayName() + " " + player.getName().getString() + " 已出局。";
+        String outMessage = deathPrefix + "，已出局。";
         if (role == PlayerRole.RUNNER) {
             String endingReason = runnerLossReason(context, player);
             if (endingReason != null) {
@@ -83,6 +100,7 @@ public class RespawnManager {
         Integer timer = respawnTimers.get(player.getUuid());
         if (timer != null && timer > 0) {
             player.changeGameMode(GameMode.SPECTATOR);
+            player.sendMessage(Text.literal("等待复活期间，你可以在观察者模式自由选择复活地点。"), false);
             return;
         }
 
@@ -111,7 +129,9 @@ public class RespawnManager {
             if (remaining > 0) {
                 entry.setValue(remaining);
                 if (!player.isDead()) {
-                    player.sendMessage(Text.literal("复活倒计时: " + (remaining / 20 + 1) + " 秒"), true);
+                    PlayerRole role = context.getTeamManager().getRole(player);
+                    player.sendMessage(Text.literal("等待复活: " + (remaining / 20 + 1) + " 秒 | 可自由选择复活地点 | 剩余生命: "
+                            + remainingLivesText(player, role, context.getConfig())), true);
                 }
                 continue;
             }
@@ -123,7 +143,15 @@ public class RespawnManager {
                 if (context.getTeamManager().isHunter(player)) {
                     compassTracker.giveCompass(player);
                 }
+                PlayerRole role = context.getTeamManager().getRole(player);
                 player.sendMessage(Text.literal("你已重新加入游戏。"), false);
+                HunterWildcardPackets.sendHudFeedback(
+                        context,
+                        "复活完成",
+                        player.getName().getString() + " 已复活",
+                        "剩余生命: " + remainingLivesText(player, role, context.getConfig()),
+                        feedbackStyle(role)
+                );
             }
         }
     }
@@ -137,6 +165,11 @@ public class RespawnManager {
 
     public boolean isOut(ServerPlayerEntity player) {
         return outPlayers.contains(player.getUuid());
+    }
+
+    public boolean isWaitingForRespawn(ServerPlayerEntity player) {
+        Integer timer = respawnTimers.get(player.getUuid());
+        return timer != null && timer > 0 && !outPlayers.contains(player.getUuid());
     }
 
     public int getRunnerKillCount() {
@@ -221,6 +254,65 @@ public class RespawnManager {
         }
 
         return "所有逃亡者已出局，猎人阵营获胜。";
+    }
+
+    private String deathPrefix(ServerPlayerEntity player, PlayerRole role, ServerPlayerEntity hunterKiller, ModConfig config) {
+        String playerName = player.getName().getString();
+        if (role != PlayerRole.RUNNER) {
+            return role.getDisplayName() + " " + playerName + " 死亡";
+        }
+
+        if (hunterKiller != null) {
+            String prefix = "逃亡者 " + playerName + " 被 " + hunterKiller.getName().getString() + " 击杀";
+            if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
+                return prefix + "，计击杀";
+            }
+            return prefix;
+        }
+
+        if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
+            return "逃亡者 " + playerName + " 死亡，不计击杀";
+        }
+
+        return "逃亡者 " + playerName + " 死亡";
+    }
+
+    private String feedbackStyle(PlayerRole role) {
+        if (role == PlayerRole.HUNTER) {
+            return "hunter";
+        }
+        if (role == PlayerRole.RUNNER) {
+            return "respawn";
+        }
+        return "neutral";
+    }
+
+    private void announceKillCountMilestone(GameContext context, int remainingKills) {
+        if (remainingKills != 5 && remainingKills != 3 && remainingKills != 2 && remainingKills != 1) {
+            return;
+        }
+
+        Text message = Text.literal("[猎人外卡] 猎人距离击杀数胜利还差 " + remainingKills + " 个人头。").formatted(Formatting.GOLD);
+        for (ServerPlayerEntity participant : context.getParticipants()) {
+            participant.sendMessage(message);
+        }
+    }
+
+    private String remainingLivesText(ServerPlayerEntity player, PlayerRole role, ModConfig config) {
+        if (role == null) {
+            return "未知";
+        }
+
+        RespawnMode mode = modeFor(role, config);
+        if (mode == RespawnMode.INFINITE) {
+            return "无限";
+        }
+
+        if (mode == RespawnMode.NO_RESPAWN) {
+            return "0";
+        }
+
+        return Integer.toString(remainingLives.getOrDefault(player.getUuid(), initialLives(role, config)));
     }
 
     public record DeathOutcome(String message, String endingReason) {

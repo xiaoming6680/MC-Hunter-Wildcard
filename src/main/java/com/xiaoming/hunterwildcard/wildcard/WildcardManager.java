@@ -2,6 +2,7 @@ package com.xiaoming.hunterwildcard.wildcard;
 
 import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameContext;
+import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.ui.BossBarManager;
 import com.xiaoming.hunterwildcard.ui.MessageManager;
 import com.xiaoming.hunterwildcard.wildcard.rules.CompassChaosRule;
@@ -18,6 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class WildcardManager {
+    private static final int WILDCARD_DRAW_DELAY_TICKS = 100;
+
     private final List<WildcardRule> rules = List.of(
             new SpeedRushRule(),
             new FeatherweightRule(),
@@ -32,8 +35,10 @@ public class WildcardManager {
     private final MessageManager messageManager;
 
     private WildcardRule activeRule;
+    private WildcardRule pendingRule;
     private Class<?> lastRuleClass;
     private int activeRemainingTicks;
+    private int pendingDrawTicks;
     private int ticksUntilNextWildcard = -1;
 
     public WildcardManager(BossBarManager bossBarManager, MessageManager messageManager) {
@@ -43,11 +48,21 @@ public class WildcardManager {
 
     public void reset() {
         activeRule = null;
+        pendingRule = null;
         activeRemainingTicks = 0;
+        pendingDrawTicks = 0;
         ticksUntilNextWildcard = -1;
     }
 
     public void tick(GameContext context) {
+        if (pendingRule != null) {
+            pendingDrawTicks--;
+            if (pendingDrawTicks <= 0) {
+                activatePendingRule(context);
+            }
+            return;
+        }
+
         if (activeRule != null) {
             activeRemainingTicks--;
             activeRule.onTick(context, activeRemainingTicks);
@@ -81,9 +96,11 @@ public class WildcardManager {
         }
 
         activeRule = null;
+        pendingRule = null;
         activeRemainingTicks = 0;
+        pendingDrawTicks = 0;
         ticksUntilNextWildcard = -1;
-        bossBarManager.clear();
+        bossBarManager.clearWildcardBar();
     }
 
     public void onConfigChanged(ModConfig config) {
@@ -96,6 +113,9 @@ public class WildcardManager {
         if (activeRule != null) {
             stopActiveRule(context);
         }
+        if (pendingRule != null) {
+            cancelPendingRule(context, false);
+        }
 
         return startRandomRule(context);
     }
@@ -103,6 +123,9 @@ public class WildcardManager {
     public boolean startRuleByName(GameContext context, String ruleName) {
         if (activeRule != null) {
             stopActiveRule(context);
+        }
+        if (pendingRule != null) {
+            cancelPendingRule(context, false);
         }
 
         for (WildcardRule rule : rules) {
@@ -116,6 +139,11 @@ public class WildcardManager {
     }
 
     public boolean stopActiveRule(GameContext context) {
+        if (pendingRule != null) {
+            cancelPendingRule(context, true);
+            return true;
+        }
+
         if (activeRule == null) {
             return false;
         }
@@ -128,8 +156,15 @@ public class WildcardManager {
         return activeRule;
     }
 
+    public boolean hasRuleInProgress() {
+        return activeRule != null || pendingRule != null;
+    }
+
     public String getActiveRuleName() {
-        return activeRule == null ? null : activeRule.getName();
+        if (activeRule != null) {
+            return activeRule.getName();
+        }
+        return pendingRule == null ? null : pendingRule.getName();
     }
 
     public int getActiveRemainingTicks() {
@@ -137,7 +172,7 @@ public class WildcardManager {
     }
 
     public int getTicksUntilNextWildcard() {
-        return activeRule == null ? ticksUntilNextWildcard : -1;
+        return activeRule == null && pendingRule == null ? ticksUntilNextWildcard : -1;
     }
 
     public List<WildcardStatus> getRuleStatuses(ModConfig config) {
@@ -164,15 +199,39 @@ public class WildcardManager {
     }
 
     private boolean startRule(GameContext context, WildcardRule rule) {
-        activeRule = rule;
-        lastRuleClass = activeRule.getClass();
-        activeRemainingTicks = context.getConfig().getWildcardDurationTicks();
+        pendingRule = rule;
+        lastRuleClass = pendingRule.getClass();
+        pendingDrawTicks = WILDCARD_DRAW_DELAY_TICKS;
         ticksUntilNextWildcard = -1;
+
+        HunterWildcardPackets.sendWildcardDraw(context, pendingRule.getName());
+        return true;
+    }
+
+    private void activatePendingRule(GameContext context) {
+        if (pendingRule == null) {
+            return;
+        }
+
+        activeRule = pendingRule;
+        pendingRule = null;
+        pendingDrawTicks = 0;
+        activeRemainingTicks = context.getConfig().getWildcardDurationTicks();
 
         activeRule.onStart(context);
         bossBarManager.updateWildcardBar(context, activeRule.getName(), activeRemainingTicks, context.getConfig().getWildcardDurationTicks());
         messageManager.toParticipants(context, "外卡触发: " + activeRule.getName());
-        return true;
+    }
+
+    private void cancelPendingRule(GameContext context, boolean resetInterval) {
+        if (pendingRule != null) {
+            messageManager.toParticipants(context, "外卡抽取已取消: " + pendingRule.getName());
+        }
+
+        pendingRule = null;
+        pendingDrawTicks = 0;
+        ticksUntilNextWildcard = resetInterval ? context.getConfig().getWildcardIntervalTicks() : -1;
+        bossBarManager.clearWildcardBar();
     }
 
     private void stopActiveRuleInternal(GameContext context, boolean resetInterval) {
@@ -184,7 +243,7 @@ public class WildcardManager {
         activeRule = null;
         activeRemainingTicks = 0;
         ticksUntilNextWildcard = resetInterval ? context.getConfig().getWildcardIntervalTicks() : -1;
-        bossBarManager.clear();
+        bossBarManager.clearWildcardBar();
     }
 
     private List<WildcardRule> getEnabledRules(ModConfig config) {

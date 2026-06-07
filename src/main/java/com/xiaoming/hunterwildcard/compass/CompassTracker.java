@@ -77,6 +77,16 @@ public class CompassTracker {
         }
     }
 
+    public void removeRunnerCompasses(GameContext context) {
+        for (ServerPlayerEntity runner : context.getRunners()) {
+            removeCompass(runner);
+        }
+    }
+
+    public boolean normalizeHunterCompasses(ServerPlayerEntity hunter) {
+        return ensureSingleHunterCompass(hunter);
+    }
+
     private void updateHunterCompasses(GameContext context, WildcardRule activeRule) {
         List<ServerPlayerEntity> runners = context.getRunners();
         if (runners.isEmpty()) {

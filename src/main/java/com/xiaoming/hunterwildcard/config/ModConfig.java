@@ -34,6 +34,8 @@ public class ModConfig {
     public boolean hunterPrepareBoundaryEnabled = true;
     public int hunterPrepareBoundaryRadius = 20;
     public int hunterPrepareBoundaryWarnDistance = 3;
+    public boolean runnerDeathNoDrops = false;
+    public boolean hunterDeathNoDrops = false;
 
     public String runnerVictoryType = "DRAGON";
     public String runnerWinMode = "ANY_ENABLED";
@@ -162,6 +164,8 @@ public class ModConfig {
         hunterPrepareBoundaryEnabled = other.hunterPrepareBoundaryEnabled;
         hunterPrepareBoundaryRadius = other.hunterPrepareBoundaryRadius;
         hunterPrepareBoundaryWarnDistance = other.hunterPrepareBoundaryWarnDistance;
+        runnerDeathNoDrops = other.runnerDeathNoDrops;
+        hunterDeathNoDrops = other.hunterDeathNoDrops;
         runnerVictoryType = other.runnerVictoryType;
         runnerWinMode = other.runnerWinMode;
         enableDragonWin = other.enableDragonWin;

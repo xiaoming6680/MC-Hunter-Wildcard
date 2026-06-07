@@ -3,6 +3,7 @@ package com.xiaoming.hunterwildcard.network;
 import com.xiaoming.hunterwildcard.HunterWildcardMod;
 import com.xiaoming.hunterwildcard.command.HunterWildcardCommand;
 import com.xiaoming.hunterwildcard.config.ModConfig;
+import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.game.GameManager;
 import com.xiaoming.hunterwildcard.game.GameState;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
@@ -23,6 +24,12 @@ public class HunterWildcardPackets {
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "sync_config"));
     public static final CustomPayload.Id<OperationResultPayload> S2C_OPERATION_RESULT =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "operation_result"));
+    public static final CustomPayload.Id<WildcardDrawPayload> S2C_WILDCARD_DRAW =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "wildcard_draw"));
+    public static final CustomPayload.Id<HunterKillFeedbackPayload> S2C_HUNTER_KILL_FEEDBACK =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hunter_kill_feedback"));
+    public static final CustomPayload.Id<HudFeedbackPayload> S2C_HUD_FEEDBACK =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hud_feedback"));
     public static final CustomPayload.Id<UpdateConfigPayload> C2S_UPDATE_CONFIG =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "update_config"));
     public static final CustomPayload.Id<ReloadConfigPayload> C2S_RELOAD_CONFIG =
@@ -51,6 +58,9 @@ public class HunterWildcardPackets {
         PayloadTypeRegistry.playC2S().register(C2S_REQUEST_CONFIG, RequestConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_SYNC_CONFIG, SyncConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_OPERATION_RESULT, OperationResultPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_WILDCARD_DRAW, WildcardDrawPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_HUNTER_KILL_FEEDBACK, HunterKillFeedbackPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_HUD_FEEDBACK, HudFeedbackPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_UPDATE_CONFIG, UpdateConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_RELOAD_CONFIG, ReloadConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_DEBUG_ACTION, DebugActionPayload.CODEC);
@@ -102,6 +112,40 @@ public class HunterWildcardPackets {
         sendOperationResult(player, success, message);
     }
 
+    public static void sendWildcardDraw(GameContext context, String wildcardName) {
+        for (ServerPlayerEntity player : context.getParticipants()) {
+            if (ServerPlayNetworking.canSend(player, S2C_WILDCARD_DRAW)) {
+                ServerPlayNetworking.send(player, new WildcardDrawPayload(wildcardName));
+            }
+        }
+    }
+
+    public static void sendHunterKillFeedback(GameContext context, String hunterName, String runnerName, int remainingKills, int currentKills, int targetKills) {
+        HunterKillFeedbackPayload payload = new HunterKillFeedbackPayload(hunterName, runnerName, remainingKills, currentKills, targetKills);
+        for (ServerPlayerEntity player : context.getServer().getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_HUNTER_KILL_FEEDBACK)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    public static void sendHudFeedback(GameContext context, String title, String line1, String line2, String style) {
+        sendHudFeedback(context.getServer(), title, line1, line2, style);
+    }
+
+    public static void sendHudFeedback(MinecraftServer server, String title, String line1, String line2, String style) {
+        if (server == null) {
+            return;
+        }
+
+        HudFeedbackPayload payload = new HudFeedbackPayload(title, line1, line2, style);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_HUD_FEEDBACK)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
     private static SyncConfigPayload createSyncPayload(ServerPlayerEntity player) {
         GameManager manager = GameManager.getInstance();
         String activeWildcard = manager.getWildcardManager().getActiveRuleName();
@@ -119,7 +163,7 @@ public class HunterWildcardPackets {
                 activeWildcard,
                 playerRole == null ? "未加入" : playerRole.getDisplayName(),
                 playerRole != null,
-                manager.getWildcardManager().getActiveRule() != null,
+                manager.getWildcardManager().hasRuleInProgress(),
                 ticksToSeconds(manager.getPhaseRemainingTicks()),
                 ticksToSeconds(manager.getActiveWildcardRemainingTicks()),
                 ticksToSeconds(manager.getTicksUntilNextWildcard()),
@@ -136,6 +180,11 @@ public class HunterWildcardPackets {
         }
 
         GameManager manager = GameManager.getInstance();
+        if (manager.getState() != GameState.WAITING) {
+            fail(player, "游戏开始后不能编辑配置。");
+            return;
+        }
+
         manager.applyConfig(snapshot.toConfig());
         if (manager.saveConfig()) {
             String message = "配置已保存。";
@@ -155,7 +204,11 @@ public class HunterWildcardPackets {
         }
 
         GameManager manager = GameManager.getInstance();
-        manager.reloadConfig();
+        if (!manager.reloadConfig()) {
+            fail(player, "游戏开始后不能重新加载配置。");
+            return;
+        }
+
         String message = "配置已重新加载。";
         manager.getMessageManager().direct(player, message);
         syncAllAndResult(player, true, message);
@@ -198,7 +251,7 @@ public class HunterWildcardPackets {
                 syncAllAndResult(player, activeRule != null, activeRule == null ? "没有可用外卡。" : "已随机触发外卡: " + activeRule);
             }
             case STOP_WILDCARD -> {
-                boolean hadWildcard = manager.getWildcardManager().getActiveRule() != null;
+                boolean hadWildcard = manager.getWildcardManager().hasRuleInProgress();
                 manager.debugStopWildcard(player.getCommandSource());
                 syncAllAndResult(player, hadWildcard, hadWildcard ? "已停止当前外卡。" : "当前没有正在运行的外卡。");
             }
@@ -226,15 +279,23 @@ public class HunterWildcardPackets {
     private static void handleTeamAction(ServerPlayerEntity player, TeamAction action) {
         GameManager manager = GameManager.getInstance();
         PlayerRole previousRole = manager.getTeamManager().getRole(player);
-        boolean canJoin = manager.getState() != GameState.RUNNING && manager.getState() != GameState.ENDING;
+        boolean canChangeTeam = manager.getState() == GameState.WAITING;
+        if (!canChangeTeam) {
+            String message = action == TeamAction.LEAVE
+                    ? "游戏已经开始，当前不能离开队伍。"
+                    : "游戏已经开始，当前不能更换队伍。";
+            fail(player, message);
+            return;
+        }
+
         switch (action) {
             case JOIN_HUNTER -> manager.join(player, PlayerRole.HUNTER);
             case JOIN_RUNNER -> manager.join(player, PlayerRole.RUNNER);
             case LEAVE -> manager.leave(player);
         }
         switch (action) {
-            case JOIN_HUNTER -> syncAllAndResult(player, canJoin, canJoin ? "已加入猎人队伍。" : "游戏已经开始，当前不能加入队伍。");
-            case JOIN_RUNNER -> syncAllAndResult(player, canJoin, canJoin ? "已加入逃亡者队伍。" : "游戏已经开始，当前不能加入队伍。");
+            case JOIN_HUNTER -> syncAllAndResult(player, true, "已加入猎人队伍。");
+            case JOIN_RUNNER -> syncAllAndResult(player, true, "已加入逃亡者队伍。");
             case LEAVE -> syncAllAndResult(player, previousRole != null, previousRole == null ? "你当前不在游戏队伍中。" : "已离开 " + previousRole.getDisplayName() + " 队伍。");
         }
     }
@@ -336,6 +397,8 @@ public class HunterWildcardPackets {
             boolean hunterPrepareBoundaryEnabled,
             int hunterPrepareBoundaryRadius,
             int hunterPrepareBoundaryWarnDistance,
+            boolean runnerDeathNoDrops,
+            boolean hunterDeathNoDrops,
             String runnerVictoryType,
             String runnerWinMode,
             boolean enableDragonWin,
@@ -382,6 +445,8 @@ public class HunterWildcardPackets {
                     buf.readBoolean(),
                     buf.readInt(),
                     buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
                     buf.readString(32),
                     buf.readString(32),
                     buf.readBoolean(),
@@ -429,6 +494,8 @@ public class HunterWildcardPackets {
             buf.writeBoolean(hunterPrepareBoundaryEnabled);
             buf.writeInt(hunterPrepareBoundaryRadius);
             buf.writeInt(hunterPrepareBoundaryWarnDistance);
+            buf.writeBoolean(runnerDeathNoDrops);
+            buf.writeBoolean(hunterDeathNoDrops);
             buf.writeString(runnerVictoryType);
             buf.writeString(runnerWinMode);
             buf.writeBoolean(enableDragonWin);
@@ -476,6 +543,8 @@ public class HunterWildcardPackets {
                     config.hunterPrepareBoundaryEnabled,
                     config.hunterPrepareBoundaryRadius,
                     config.hunterPrepareBoundaryWarnDistance,
+                    config.runnerDeathNoDrops,
+                    config.hunterDeathNoDrops,
                     config.runnerVictoryType,
                     config.runnerWinMode,
                     config.enableDragonWin,
@@ -524,6 +593,8 @@ public class HunterWildcardPackets {
             config.hunterPrepareBoundaryEnabled = hunterPrepareBoundaryEnabled;
             config.hunterPrepareBoundaryRadius = hunterPrepareBoundaryRadius;
             config.hunterPrepareBoundaryWarnDistance = hunterPrepareBoundaryWarnDistance;
+            config.runnerDeathNoDrops = runnerDeathNoDrops;
+            config.hunterDeathNoDrops = hunterDeathNoDrops;
             config.runnerVictoryType = runnerVictoryType;
             config.runnerWinMode = runnerWinMode;
             config.enableDragonWin = enableDragonWin;
@@ -651,6 +722,78 @@ public class HunterWildcardPackets {
         @Override
         public Id<? extends CustomPayload> getId() {
             return S2C_OPERATION_RESULT;
+        }
+    }
+
+    public record WildcardDrawPayload(String wildcardName) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, WildcardDrawPayload> CODEC =
+                PacketCodec.of(WildcardDrawPayload::write, WildcardDrawPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeString(wildcardName);
+        }
+
+        private static WildcardDrawPayload read(RegistryByteBuf buf) {
+            return new WildcardDrawPayload(buf.readString(64));
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_WILDCARD_DRAW;
+        }
+    }
+
+    public record HunterKillFeedbackPayload(String hunterName, String runnerName, int remainingKills, int currentKills, int targetKills) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, HunterKillFeedbackPayload> CODEC =
+                PacketCodec.of(HunterKillFeedbackPayload::write, HunterKillFeedbackPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeString(hunterName);
+            buf.writeString(runnerName);
+            buf.writeInt(remainingKills);
+            buf.writeInt(currentKills);
+            buf.writeInt(targetKills);
+        }
+
+        private static HunterKillFeedbackPayload read(RegistryByteBuf buf) {
+            return new HunterKillFeedbackPayload(
+                    buf.readString(64),
+                    buf.readString(64),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt()
+            );
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_HUNTER_KILL_FEEDBACK;
+        }
+    }
+
+    public record HudFeedbackPayload(String title, String line1, String line2, String style) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, HudFeedbackPayload> CODEC =
+                PacketCodec.of(HudFeedbackPayload::write, HudFeedbackPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeString(title == null ? "" : title);
+            buf.writeString(line1 == null ? "" : line1);
+            buf.writeString(line2 == null ? "" : line2);
+            buf.writeString(style == null ? "" : style);
+        }
+
+        private static HudFeedbackPayload read(RegistryByteBuf buf) {
+            return new HudFeedbackPayload(
+                    buf.readString(64),
+                    buf.readString(128),
+                    buf.readString(128),
+                    buf.readString(32)
+            );
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_HUD_FEEDBACK;
         }
     }
 

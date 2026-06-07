@@ -2,6 +2,7 @@ package com.xiaoming.hunterwildcard.game;
 
 import com.xiaoming.hunterwildcard.compass.CompassTracker;
 import com.xiaoming.hunterwildcard.config.ModConfig;
+import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.prepare.HunterBoundaryManager;
 import com.xiaoming.hunterwildcard.respawn.RespawnManager;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
@@ -17,15 +18,21 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.entity.boss.dragon.EnderDragonEntity;
 import net.minecraft.entity.damage.DamageSource;
 import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
+import net.minecraft.world.rule.GameRules;
 
-import java.util.Random;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
@@ -43,6 +50,7 @@ public class GameManager {
     private final WildcardManager wildcardManager = new WildcardManager(bossBarManager, messageManager);
     private final Random random = new Random();
     private final Set<UUID> debugMenuPlayers = new HashSet<>();
+    private final Map<UUID, List<ItemStack>> preservedDeathInventories = new HashMap<>();
 
     private GameState state = GameState.WAITING;
     private MinecraftServer server;
@@ -51,6 +59,7 @@ public class GameManager {
     private int actionBarTicks;
     private boolean eventsRegistered;
     private UUID wildcardTestPlayerUuid;
+    private Boolean previousLocatorBarRule;
 
     private GameManager() {
     }
@@ -90,7 +99,7 @@ public class GameManager {
         }
 
         server = source.getServer();
-        if (wildcardManager.getActiveRule() != null) {
+        if (wildcardManager.hasRuleInProgress()) {
             wildcardManager.clear(debugContext(server));
             wildcardTestPlayerUuid = null;
         }
@@ -98,11 +107,13 @@ public class GameManager {
         preparingTicks = config.getPreparingTicks();
         endingTicks = 0;
         actionBarTicks = 0;
+        disableLocatorBarForRound(server);
         wildcardManager.reset();
         respawnManager.clear();
         winConditionManager.clear();
         compassTracker.reset();
         hunterBoundaryManager.start(context());
+        bossBarManager.updatePrepareBar(context(), preparingTicks, config.getPreparingTicks());
 
         messageManager.broadcast(server, "游戏开始准备，" + config.preparingSeconds + " 秒后进入追杀阶段。");
         source.sendFeedback(() -> Text.literal("猎人外卡已进入 PREPARING。"), true);
@@ -121,8 +132,8 @@ public class GameManager {
     }
 
     public void join(ServerPlayerEntity player, PlayerRole role) {
-        if (state == GameState.RUNNING || state == GameState.ENDING) {
-            messageManager.direct(player, "游戏已经开始，当前不能加入队伍。");
+        if (state != GameState.WAITING) {
+            messageManager.direct(player, "游戏已经开始，当前不能更换队伍。");
             return;
         }
 
@@ -131,6 +142,11 @@ public class GameManager {
     }
 
     public void leave(ServerPlayerEntity player) {
+        if (state != GameState.WAITING) {
+            messageManager.direct(player, "游戏已经开始，当前不能离开队伍。");
+            return;
+        }
+
         PlayerRole oldRole = teamManager.leave(player);
         respawnManager.remove(player);
         hunterBoundaryManager.remove(player);
@@ -214,17 +230,29 @@ public class GameManager {
     }
 
     public boolean reloadConfig() {
+        if (state != GameState.WAITING) {
+            return false;
+        }
+
         config.copyFrom(ModConfig.load());
         notifyConfigChanged();
         return true;
     }
 
     public void reloadConfig(ServerCommandSource source) {
-        reloadConfig();
-        source.sendFeedback(() -> Text.literal("已重新读取 config/hunterwildcard.json。"), true);
+        if (reloadConfig()) {
+            source.sendFeedback(() -> Text.literal("已重新读取 config/hunterwildcard.json。"), true);
+        } else {
+            source.sendError(Text.literal("游戏开始后不能重新加载配置。"));
+        }
     }
 
     public void saveConfig(ServerCommandSource source) {
+        if (state != GameState.WAITING) {
+            source.sendError(Text.literal("游戏开始后不能保存配置。"));
+            return;
+        }
+
         if (saveConfig()) {
             source.sendFeedback(() -> Text.literal("已保存 config/hunterwildcard.json。"), true);
         } else {
@@ -285,7 +313,7 @@ public class GameManager {
     }
 
     private void tick(MinecraftServer tickServer) {
-        if (state == GameState.WAITING && wildcardManager.getActiveRule() != null) {
+        if (state == GameState.WAITING && wildcardManager.hasRuleInProgress()) {
             server = tickServer;
             wildcardManager.tick(debugContext(tickServer));
             return;
@@ -313,14 +341,9 @@ public class GameManager {
 
     private void tickPreparing() {
         preparingTicks--;
-        actionBarTicks--;
-        hunterBoundaryManager.tick(context());
-
-        if (actionBarTicks <= 0) {
-            actionBarTicks = config.getActionBarIntervalTicks();
-            int seconds = Math.max(0, preparingTicks / 20);
-            messageManager.actionBar(context(), "准备阶段 | " + seconds + " 秒后开始追杀");
-        }
+        GameContext context = context();
+        hunterBoundaryManager.tick(context);
+        bossBarManager.updatePrepareBar(context, preparingTicks, config.getPreparingTicks());
 
         if (preparingTicks <= 0) {
             startRunning();
@@ -331,6 +354,7 @@ public class GameManager {
         state = GameState.RUNNING;
         actionBarTicks = 0;
         hunterBoundaryManager.clear();
+        bossBarManager.clearPrepareBar();
         respawnManager.start(context());
         winConditionManager.start();
         wildcardManager.reset();
@@ -341,6 +365,7 @@ public class GameManager {
     private void tickRunning() {
         GameContext context = context();
         compassTracker.tick(context, wildcardManager.getActiveRule());
+        compassTracker.removeRunnerCompasses(context);
         respawnManager.tick(context, compassTracker);
         wildcardManager.tick(context);
         checkWinConditions();
@@ -358,6 +383,10 @@ public class GameManager {
         if (actionBarTicks <= 0) {
             actionBarTicks = config.getActionBarIntervalTicks();
             for (ServerPlayerEntity player : context.getParticipants()) {
+                if (respawnManager.isWaitingForRespawn(player)) {
+                    continue;
+                }
+
                 PlayerRole role = teamManager.getRole(player);
                 String roleName = role == null ? "旁观" : role.getDisplayName();
                 messageManager.actionBar(player, "RUNNING | 你的身份: " + roleName);
@@ -381,8 +410,22 @@ public class GameManager {
         wildcardManager.onPlayerDeath(context, player);
 
         PlayerRole role = teamManager.getRole(player);
-        boolean killedByHunter = damageSource.getAttacker() instanceof ServerPlayerEntity attacker && teamManager.isHunter(attacker);
-        RespawnManager.DeathOutcome outcome = respawnManager.onPlayerDeath(context, player, role, killedByHunter);
+        ServerPlayerEntity hunterKiller = damageSource.getAttacker() instanceof ServerPlayerEntity attacker && teamManager.isHunter(attacker)
+                ? attacker
+                : null;
+        ServerPlayerEntity runnerKiller = damageSource.getAttacker() instanceof ServerPlayerEntity attacker && teamManager.isRunner(attacker)
+                ? attacker
+                : null;
+        if (role == PlayerRole.HUNTER && runnerKiller != null) {
+            HunterWildcardPackets.sendHudFeedback(
+                    context,
+                    "反杀！",
+                    runnerKiller.getName().getString() + " -> " + player.getName().getString(),
+                    "猎人被击杀",
+                    "runner"
+            );
+        }
+        RespawnManager.DeathOutcome outcome = respawnManager.onPlayerDeath(context, player, role, hunterKiller);
         if (outcome.message() != null) {
             messageManager.toParticipants(context, outcome.message());
         }
@@ -392,11 +435,64 @@ public class GameManager {
     }
 
     private void handleAfterRespawn(ServerPlayerEntity player) {
+        restorePreservedDeathInventory(player);
         if (state != GameState.RUNNING) {
             return;
         }
 
         respawnManager.onAfterRespawn(context(), player, compassTracker);
+    }
+
+    public boolean handleDeathInventoryDrop(ServerPlayerEntity player) {
+        if (state != GameState.RUNNING) {
+            return false;
+        }
+
+        PlayerRole role = teamManager.getRole(player);
+        if (role == PlayerRole.HUNTER) {
+            compassTracker.normalizeHunterCompasses(player);
+            if (config.hunterDeathNoDrops) {
+                preserveDeathInventory(player);
+                return true;
+            }
+
+            compassTracker.removeCompass(player);
+            return false;
+        }
+
+        if (role == PlayerRole.RUNNER && config.runnerDeathNoDrops) {
+            preserveDeathInventory(player);
+            return true;
+        }
+
+        return false;
+    }
+
+    private void preserveDeathInventory(ServerPlayerEntity player) {
+        PlayerInventory inventory = player.getInventory();
+        List<ItemStack> stacks = new ArrayList<>(inventory.size());
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            stacks.add(inventory.getStack(slot).copy());
+        }
+        preservedDeathInventories.put(player.getUuid(), stacks);
+    }
+
+    private void restorePreservedDeathInventory(ServerPlayerEntity player) {
+        List<ItemStack> stacks = preservedDeathInventories.remove(player.getUuid());
+        if (stacks == null) {
+            return;
+        }
+
+        PlayerInventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.size(); slot++) {
+            ItemStack stack = slot < stacks.size() ? stacks.get(slot).copy() : ItemStack.EMPTY;
+            inventory.setStack(slot, stack);
+        }
+        if (teamManager.isHunter(player)) {
+            compassTracker.normalizeHunterCompasses(player);
+        } else if (teamManager.isRunner(player)) {
+            compassTracker.removeCompass(player);
+        }
     }
 
     private void handleDragonDeath() {
@@ -418,6 +514,7 @@ public class GameManager {
         PlayerRole role = teamManager.leave(player);
         respawnManager.remove(player);
         hunterBoundaryManager.remove(player);
+        preservedDeathInventories.remove(player.getUuid());
         if (role != null && state != GameState.WAITING) {
             checkWinConditions();
         }
@@ -453,14 +550,45 @@ public class GameManager {
 
         state = GameState.ENDING;
         endingTicks = config.getEndingTicks();
+        sendEndingFeedback(reason);
         clearRoundEffects(context());
         messageManager.broadcast(server, reason);
+    }
+
+    private void sendEndingFeedback(String reason) {
+        boolean runnerWin = reason.contains("逃亡者阵营获胜") || reason.startsWith("逃亡者达成胜利目标");
+        boolean hunterWin = reason.contains("猎人阵营获胜") && !reason.startsWith("猎人累计击杀");
+        if (!runnerWin && !hunterWin) {
+            return;
+        }
+
+        String title = runnerWin ? "逃亡者胜利" : "猎人胜利";
+        String style = runnerWin ? "runner" : "hunter";
+        HunterWildcardPackets.sendHudFeedback(server, title, compactEndingReason(reason), "本局进入结算", style);
+    }
+
+    private String compactEndingReason(String reason) {
+        String text = reason == null ? "" : reason.replace("。", "");
+        if (text.startsWith("逃亡者达成胜利目标：")) {
+            text = text.substring("逃亡者达成胜利目标：".length());
+        } else if (text.startsWith("猎人累计击杀逃亡者达到")) {
+            text = "击杀目标完成";
+        } else if (text.contains("所有逃亡者已出局")) {
+            text = "逃亡者全员出局";
+        } else if (text.contains("没有在线逃亡者")) {
+            text = "逃亡者离线";
+        } else if (text.contains("没有在线猎人")) {
+            text = "猎人离线";
+        }
+
+        return text.length() > 28 ? text.substring(0, 28) + "..." : text;
     }
 
     private void cleanupAndReset(MinecraftServer cleanupServer) {
         MinecraftServer targetServer = cleanupServer != null ? cleanupServer : server;
         if (targetServer != null) {
             clearRoundEffects(debugContext(targetServer));
+            restoreLocatorBarRule(targetServer);
         }
 
         teamManager.clear();
@@ -475,6 +603,8 @@ public class GameManager {
         respawnManager.clear();
         hunterBoundaryManager.clear();
         winConditionManager.clear();
+        preservedDeathInventories.clear();
+        previousLocatorBarRule = null;
     }
 
     private void clearRoundEffects(GameContext context) {
@@ -514,5 +644,24 @@ public class GameManager {
     private void notifyConfigChanged() {
         wildcardManager.onConfigChanged(config);
         compassTracker.onConfigChanged(config);
+    }
+
+    private void disableLocatorBarForRound(MinecraftServer targetServer) {
+        if (targetServer == null) {
+            return;
+        }
+
+        if (previousLocatorBarRule == null) {
+            previousLocatorBarRule = targetServer.getOverworld().getGameRules().getValue(GameRules.LOCATOR_BAR);
+        }
+        targetServer.getOverworld().getGameRules().setValue(GameRules.LOCATOR_BAR, false, targetServer);
+    }
+
+    private void restoreLocatorBarRule(MinecraftServer targetServer) {
+        if (targetServer == null || previousLocatorBarRule == null) {
+            return;
+        }
+
+        targetServer.getOverworld().getGameRules().setValue(GameRules.LOCATOR_BAR, previousLocatorBarRule, targetServer);
     }
 }
