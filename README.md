@@ -113,7 +113,6 @@ Windows PowerShell：
 build/libs/hunter-wildcard-1.0.0.jar
 ```
 
-发布到 GitHub Releases 时，通常上传普通 jar 即可；`-sources.jar` 主要用于源码引用。
 
 ## GitHub 发布建议
 
