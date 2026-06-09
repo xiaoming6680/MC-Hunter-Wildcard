@@ -26,10 +26,14 @@ public class HunterWildcardPackets {
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "operation_result"));
     public static final CustomPayload.Id<WildcardDrawPayload> S2C_WILDCARD_DRAW =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "wildcard_draw"));
+    public static final CustomPayload.Id<WildcardIntroPayload> S2C_WILDCARD_INTRO =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "wildcard_intro"));
     public static final CustomPayload.Id<HunterKillFeedbackPayload> S2C_HUNTER_KILL_FEEDBACK =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hunter_kill_feedback"));
     public static final CustomPayload.Id<HudFeedbackPayload> S2C_HUD_FEEDBACK =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hud_feedback"));
+    public static final CustomPayload.Id<WeaponOverheatStatusPayload> S2C_WEAPON_OVERHEAT_STATUS =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "weapon_overheat_status"));
     public static final CustomPayload.Id<UpdateConfigPayload> C2S_UPDATE_CONFIG =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "update_config"));
     public static final CustomPayload.Id<ReloadConfigPayload> C2S_RELOAD_CONFIG =
@@ -59,8 +63,10 @@ public class HunterWildcardPackets {
         PayloadTypeRegistry.playS2C().register(S2C_SYNC_CONFIG, SyncConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_OPERATION_RESULT, OperationResultPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_WILDCARD_DRAW, WildcardDrawPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_WILDCARD_INTRO, WildcardIntroPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_HUNTER_KILL_FEEDBACK, HunterKillFeedbackPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_HUD_FEEDBACK, HudFeedbackPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_WEAPON_OVERHEAT_STATUS, WeaponOverheatStatusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_UPDATE_CONFIG, UpdateConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_RELOAD_CONFIG, ReloadConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_DEBUG_ACTION, DebugActionPayload.CODEC);
@@ -120,6 +126,24 @@ public class HunterWildcardPackets {
         }
     }
 
+    public static void sendWildcardIntro(GameContext context, String wildcardName, String description) {
+        WildcardIntroPayload payload = new WildcardIntroPayload(wildcardName, description, true);
+        for (ServerPlayerEntity player : context.getParticipants()) {
+            if (ServerPlayNetworking.canSend(player, S2C_WILDCARD_INTRO)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    public static void clearWildcardIntro(GameContext context) {
+        WildcardIntroPayload payload = new WildcardIntroPayload("", "", false);
+        for (ServerPlayerEntity player : context.getParticipants()) {
+            if (ServerPlayNetworking.canSend(player, S2C_WILDCARD_INTRO)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
     public static void sendHunterKillFeedback(GameContext context, String hunterName, String runnerName, int remainingKills, int currentKills, int targetKills) {
         HunterKillFeedbackPayload payload = new HunterKillFeedbackPayload(hunterName, runnerName, remainingKills, currentKills, targetKills);
         for (ServerPlayerEntity player : context.getServer().getPlayerManager().getPlayerList()) {
@@ -143,6 +167,18 @@ public class HunterWildcardPackets {
             if (ServerPlayNetworking.canSend(player, S2C_HUD_FEEDBACK)) {
                 ServerPlayNetworking.send(player, payload);
             }
+        }
+    }
+
+    public static void sendWeaponOverheatStatus(ServerPlayerEntity player, int heat, int maxHeat) {
+        if (ServerPlayNetworking.canSend(player, S2C_WEAPON_OVERHEAT_STATUS)) {
+            ServerPlayNetworking.send(player, new WeaponOverheatStatusPayload(Math.max(0, heat), Math.max(1, maxHeat), true));
+        }
+    }
+
+    public static void clearWeaponOverheatStatus(ServerPlayerEntity player) {
+        if (ServerPlayNetworking.canSend(player, S2C_WEAPON_OVERHEAT_STATUS)) {
+            ServerPlayNetworking.send(player, new WeaponOverheatStatusPayload(0, 1, false));
         }
     }
 
@@ -429,7 +465,15 @@ public class HunterWildcardPackets {
             boolean enableExplosiveDeath,
             boolean enableSupplyDrop,
             boolean enableHunterRadar,
-            boolean enableCompassChaos
+            boolean enableCompassChaos,
+            boolean enableHungerChase,
+            boolean enableWeaponOverheat,
+            boolean enableLightLoad,
+            boolean enableBlockDecay,
+            boolean enablePearlFrenzy,
+            boolean enableWindChargeBrawl,
+            boolean enableBloodRage,
+            boolean enableDisabledWildcard
     ) {
         private static ConfigSnapshot fromBuf(RegistryByteBuf buf) {
             return new ConfigSnapshot(
@@ -470,6 +514,14 @@ public class HunterWildcardPackets {
                     buf.readString(32),
                     buf.readBoolean(),
                     buf.readInt(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
+                    buf.readBoolean(),
                     buf.readBoolean(),
                     buf.readBoolean(),
                     buf.readBoolean(),
@@ -527,6 +579,14 @@ public class HunterWildcardPackets {
             buf.writeBoolean(enableSupplyDrop);
             buf.writeBoolean(enableHunterRadar);
             buf.writeBoolean(enableCompassChaos);
+            buf.writeBoolean(enableHungerChase);
+            buf.writeBoolean(enableWeaponOverheat);
+            buf.writeBoolean(enableLightLoad);
+            buf.writeBoolean(enableBlockDecay);
+            buf.writeBoolean(enablePearlFrenzy);
+            buf.writeBoolean(enableWindChargeBrawl);
+            buf.writeBoolean(enableBloodRage);
+            buf.writeBoolean(enableDisabledWildcard);
         }
 
         public static ConfigSnapshot from(ModConfig config) {
@@ -575,7 +635,15 @@ public class HunterWildcardPackets {
                     config.enableExplosiveDeath,
                     config.enableSupplyDrop,
                     config.enableHunterRadar,
-                    config.enableCompassChaos
+                    config.enableCompassChaos,
+                    config.enableHungerChase,
+                    config.enableWeaponOverheat,
+                    config.enableLightLoad,
+                    config.enableBlockDecay,
+                    config.enablePearlFrenzy,
+                    config.enableWindChargeBrawl,
+                    config.enableBloodRage,
+                    config.enableDisabledWildcard
             );
         }
 
@@ -626,6 +694,14 @@ public class HunterWildcardPackets {
             config.enableSupplyDrop = enableSupplyDrop;
             config.enableHunterRadar = enableHunterRadar;
             config.enableCompassChaos = enableCompassChaos;
+            config.enableHungerChase = enableHungerChase;
+            config.enableWeaponOverheat = enableWeaponOverheat;
+            config.enableLightLoad = enableLightLoad;
+            config.enableBlockDecay = enableBlockDecay;
+            config.enablePearlFrenzy = enablePearlFrenzy;
+            config.enableWindChargeBrawl = enableWindChargeBrawl;
+            config.enableBloodRage = enableBloodRage;
+            config.enableDisabledWildcard = enableDisabledWildcard;
             config.validate();
             return config;
         }
@@ -743,6 +819,30 @@ public class HunterWildcardPackets {
         }
     }
 
+    public record WildcardIntroPayload(String wildcardName, String description, boolean visible) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, WildcardIntroPayload> CODEC =
+                PacketCodec.of(WildcardIntroPayload::write, WildcardIntroPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeString(wildcardName == null ? "" : wildcardName);
+            buf.writeString(description == null ? "" : description);
+            buf.writeBoolean(visible);
+        }
+
+        private static WildcardIntroPayload read(RegistryByteBuf buf) {
+            return new WildcardIntroPayload(
+                    buf.readString(64),
+                    buf.readString(160),
+                    buf.readBoolean()
+            );
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_WILDCARD_INTRO;
+        }
+    }
+
     public record HunterKillFeedbackPayload(String hunterName, String runnerName, int remainingKills, int currentKills, int targetKills) implements CustomPayload {
         public static final PacketCodec<RegistryByteBuf, HunterKillFeedbackPayload> CODEC =
                 PacketCodec.of(HunterKillFeedbackPayload::write, HunterKillFeedbackPayload::read);
@@ -794,6 +894,26 @@ public class HunterWildcardPackets {
         @Override
         public Id<? extends CustomPayload> getId() {
             return S2C_HUD_FEEDBACK;
+        }
+    }
+
+    public record WeaponOverheatStatusPayload(int heat, int maxHeat, boolean visible) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, WeaponOverheatStatusPayload> CODEC =
+                PacketCodec.of(WeaponOverheatStatusPayload::write, WeaponOverheatStatusPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeInt(heat);
+            buf.writeInt(maxHeat);
+            buf.writeBoolean(visible);
+        }
+
+        private static WeaponOverheatStatusPayload read(RegistryByteBuf buf) {
+            return new WeaponOverheatStatusPayload(buf.readInt(), buf.readInt(), buf.readBoolean());
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_WEAPON_OVERHEAT_STATUS;
         }
     }
 

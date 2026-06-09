@@ -70,6 +70,14 @@ public class ModConfig {
     public boolean enableSupplyDrop = true;
     public boolean enableHunterRadar = true;
     public boolean enableCompassChaos = true;
+    public boolean enableHungerChase = true;
+    public boolean enableWeaponOverheat = true;
+    public boolean enableLightLoad = true;
+    public boolean enableBlockDecay = true;
+    public boolean enablePearlFrenzy = true;
+    public boolean enableWindChargeBrawl = true;
+    public boolean enableBloodRage = true;
+    public boolean enableDisabledWildcard = true;
 
     public static ModConfig load() {
         Path path = getConfigPath();
@@ -197,6 +205,14 @@ public class ModConfig {
         enableSupplyDrop = other.enableSupplyDrop;
         enableHunterRadar = other.enableHunterRadar;
         enableCompassChaos = other.enableCompassChaos;
+        enableHungerChase = other.enableHungerChase;
+        enableWeaponOverheat = other.enableWeaponOverheat;
+        enableLightLoad = other.enableLightLoad;
+        enableBlockDecay = other.enableBlockDecay;
+        enablePearlFrenzy = other.enablePearlFrenzy;
+        enableWindChargeBrawl = other.enableWindChargeBrawl;
+        enableBloodRage = other.enableBloodRage;
+        enableDisabledWildcard = other.enableDisabledWildcard;
         validate();
     }
 
@@ -274,6 +290,14 @@ public class ModConfig {
             case "补给空投", "SupplyDrop" -> enableSupplyDrop;
             case "猎人雷达", "HunterRadar" -> enableHunterRadar;
             case "指南针干扰", "CompassChaos" -> enableCompassChaos;
+            case "饥饿追逐", "HungerChase" -> enableHungerChase;
+            case "武器过热", "WeaponOverheat" -> enableWeaponOverheat;
+            case "轻装上阵", "LightLoad" -> enableLightLoad;
+            case "方块腐化", "BlockDecay" -> enableBlockDecay;
+            case "珍珠狂潮", "PearlFrenzy" -> enablePearlFrenzy;
+            case "风弹乱斗", "WindChargeBrawl" -> enableWindChargeBrawl;
+            case "血怒时刻", "BloodRage" -> enableBloodRage;
+            case "暂时停用", "DisabledWildcard", "NoEffect" -> enableDisabledWildcard;
             default -> false;
         };
     }

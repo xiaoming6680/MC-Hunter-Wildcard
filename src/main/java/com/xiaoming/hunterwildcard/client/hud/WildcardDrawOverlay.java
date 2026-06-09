@@ -27,6 +27,7 @@ public class WildcardDrawOverlay {
     private static final long FEEDBACK_HOLD_MS = 2300L;
     private static final long FEEDBACK_OUT_MS = 420L;
     private static final long FEEDBACK_TOTAL_MS = FEEDBACK_IN_MS + FEEDBACK_HOLD_MS + FEEDBACK_OUT_MS;
+    private static final long INTRO_SLIDE_MS = 260L;
     private static final String[] SPIN_NAMES = {
             "疾速追猎",
             "轻盈之身",
@@ -35,12 +36,28 @@ public class WildcardDrawOverlay {
             "死亡爆炸",
             "补给空投",
             "猎人雷达",
-            "指南针干扰"
+            "指南针干扰",
+            "饥饿追逐",
+            "武器过热",
+            "轻装上阵",
+            "方块腐化",
+            "珍珠狂潮",
+            "风弹乱斗",
+            "血怒时刻",
+            "暂时停用"
     };
 
     private static long drawStartTimeMs = -1L;
     private static String finalWildcard = "";
     private static boolean revealSoundPlayed;
+    private static boolean introVisible;
+    private static boolean introHiding;
+    private static long introTransitionStartTimeMs = -1L;
+    private static String introName = "";
+    private static String introDescription = "";
+    private static boolean weaponOverheatVisible;
+    private static int weaponOverheatHeat;
+    private static int weaponOverheatMaxHeat = 1;
     private static final List<FeedbackEntry> feedbackEntries = new ArrayList<>();
 
     private WildcardDrawOverlay() {
@@ -84,9 +101,109 @@ public class WildcardDrawOverlay {
         MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.BLOCK_NOTE_BLOCK_PLING, 1.15F));
     }
 
+    public static void setIntro(boolean visible, String wildcardName, String description) {
+        if (visible) {
+            introVisible = true;
+            introHiding = false;
+            introTransitionStartTimeMs = System.currentTimeMillis();
+            introName = wildcardName == null ? "" : wildcardName;
+            introDescription = description == null ? "" : description;
+            return;
+        }
+
+        if (introVisible) {
+            introHiding = true;
+            introTransitionStartTimeMs = System.currentTimeMillis();
+        }
+    }
+
+    public static void setWeaponOverheat(int heat, int maxHeat, boolean visible) {
+        weaponOverheatVisible = visible;
+        weaponOverheatHeat = Math.max(0, heat);
+        weaponOverheatMaxHeat = Math.max(1, maxHeat);
+    }
+
     private static void render(DrawContext context, RenderTickCounter tickCounter) {
         renderDrawPanel(context);
+        renderIntroPanel(context);
+        renderWeaponOverheatBar(context);
         renderFeedbackPanels(context);
+    }
+
+    private static void renderWeaponOverheatBar(DrawContext context) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (!weaponOverheatVisible || client.options.hudHidden) {
+            return;
+        }
+
+        int screenWidth = client.getWindow().getScaledWidth();
+        int screenHeight = client.getWindow().getScaledHeight();
+        int barWidth = 36;
+        int barHeight = 3;
+        int x = screenWidth / 2 - barWidth / 2;
+        int y = screenHeight / 2 + 11;
+        int heat = Math.min(weaponOverheatHeat, weaponOverheatMaxHeat);
+        int fillWidth = Math.round(barWidth * (heat / (float) weaponOverheatMaxHeat));
+        int fillColor = weaponHeatColor(heat, weaponOverheatMaxHeat);
+
+        context.fill(x - 1, y - 1, x + barWidth + 1, y + barHeight + 1, 0x96000000);
+        context.fill(x, y, x + barWidth, y + barHeight, 0x80161B22);
+        if (fillWidth > 0) {
+            context.fill(x, y, x + fillWidth, y + barHeight, fillColor);
+        }
+
+        for (int i = 1; i < weaponOverheatMaxHeat; i++) {
+            int segmentX = x + Math.round(barWidth * (i / (float) weaponOverheatMaxHeat));
+            context.fill(segmentX, y, segmentX + 1, y + barHeight, 0x70000000);
+        }
+    }
+
+    private static void renderIntroPanel(DrawContext context) {
+        if (!introVisible || introName.isBlank()) {
+            return;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        TextRenderer textRenderer = client.textRenderer;
+        int screenWidth = client.getWindow().getScaledWidth();
+        String title = "外卡：" + introName;
+        int maxAvailableWidth = Math.max(80, screenWidth - 6);
+        int compactWidth = Math.min(Math.min(184, maxAvailableWidth), Math.max(124, screenWidth / 2));
+        int wideWidth = Math.max(compactWidth, Math.min(260, maxAvailableWidth));
+        boolean needsWide = textRenderer.getWidth(title) > compactWidth - 12
+                || (!introDescription.isBlank() && textRenderer.getWidth(introDescription) > compactWidth - 12);
+        int panelWidth = needsWide ? wideWidth : compactWidth;
+        int maxDescriptionLines = needsWide ? 4 : 2;
+        List<String> descriptionLines = introDescription.isBlank()
+                ? List.of()
+                : wrap(textRenderer, introDescription, panelWidth - 12, maxDescriptionLines);
+        int panelHeight = descriptionLines.isEmpty() ? 20 : 20 + descriptionLines.size() * 11;
+        long elapsed = introTransitionStartTimeMs < 0L ? INTRO_SLIDE_MS : System.currentTimeMillis() - introTransitionStartTimeMs;
+        if (introHiding && elapsed >= INTRO_SLIDE_MS) {
+            introVisible = false;
+            introHiding = false;
+            introTransitionStartTimeMs = -1L;
+            introName = "";
+            introDescription = "";
+            return;
+        }
+
+        float progress = smooth(Math.min(1.0F, elapsed / (float) INTRO_SLIDE_MS));
+        if (introHiding) {
+            progress = 1.0F - progress;
+        }
+        float alpha = Math.max(0.0F, Math.min(1.0F, progress));
+        int panelX = -Math.round((panelWidth + 2) * (1.0F - progress));
+        int panelY = 22;
+
+        context.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, withAlpha(0xD8161B22, alpha));
+        context.fill(panelX, panelY, panelX + 2, panelY + panelHeight, withAlpha(0xFF7FC2FF, alpha));
+        context.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, withAlpha(0xAA7FC2FF, alpha));
+
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, title, panelWidth - 12)), panelX + 5, panelY + 3, withAlpha(0xFFFFFFFF, alpha), true);
+        for (int i = 0; i < descriptionLines.size(); i++) {
+            context.drawText(textRenderer, Text.literal(descriptionLines.get(i)), panelX + 5, panelY + 16 + i * 11, withAlpha(0xFFC9D4DE, alpha), false);
+        }
     }
 
     private static void renderDrawPanel(DrawContext context) {
@@ -161,10 +278,10 @@ public class WildcardDrawOverlay {
         MinecraftClient client = MinecraftClient.getInstance();
         TextRenderer textRenderer = client.textRenderer;
         int screenWidth = client.getWindow().getScaledWidth();
-        int panelWidth = Math.min(230, Math.max(178, screenWidth - 24));
-        int panelHeight = 56;
-        int targetX = screenWidth - panelWidth - 10;
-        int targetY = 12 + index * (panelHeight + 6);
+        int panelWidth = Math.min(204, Math.max(160, screenWidth - 24));
+        int panelHeight = 50;
+        int targetX = screenWidth - panelWidth;
+        int targetY = 10 + index * (panelHeight + 5);
         if (Float.isNaN(entry.currentY)) {
             entry.currentY = targetY;
         } else {
@@ -175,15 +292,15 @@ public class WildcardDrawOverlay {
         int accent = feedbackAccent(entry.style);
 
         context.fill(panelX, panelY, panelX + panelWidth, panelY + panelHeight, 0xE0161B22);
-        context.fill(panelX, panelY, panelX + 4, panelY + panelHeight, accent);
+        context.fill(panelX, panelY, panelX + 3, panelY + panelHeight, accent);
         context.fill(panelX, panelY, panelX + panelWidth, panelY + 1, accent);
         context.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, accent);
 
-        context.drawItem(feedbackIcon(entry.style), panelX + 12, panelY + 20);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.title, panelWidth - 48)), panelX + 38, panelY + 7, accent, false);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line1, panelWidth - 48)), panelX + 38, panelY + 23, 0xFFFFFFFF, true);
+        context.drawItem(feedbackIcon(entry.style), panelX + 10, panelY + 17);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.title, panelWidth - 44)), panelX + 34, panelY + 6, accent, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line1, panelWidth - 44)), panelX + 34, panelY + 21, 0xFFFFFFFF, true);
         if (!entry.line2.isBlank()) {
-            context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line2, panelWidth - 48)), panelX + 38, panelY + 39, 0xFFFFD966, false);
+            context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line2, panelWidth - 44)), panelX + 34, panelY + 36, 0xFFFFD966, false);
         }
     }
 
@@ -236,6 +353,22 @@ public class WildcardDrawOverlay {
         };
     }
 
+    private static int weaponHeatColor(int heat, int maxHeat) {
+        if (heat <= 0) {
+            return 0x00000000;
+        }
+        if (heat >= maxHeat) {
+            return 0xFFFF4C4C;
+        }
+        if (heat >= 3) {
+            return 0xFFFF9F3F;
+        }
+        if (heat >= 2) {
+            return 0xFFFFD966;
+        }
+        return 0xFF7FC2FF;
+    }
+
     private static ItemStack feedbackIcon(String style) {
         return switch (style) {
             case "runner" -> new ItemStack(Items.DIAMOND);
@@ -257,6 +390,30 @@ public class WildcardDrawOverlay {
         }
 
         return textRenderer.trimToWidth(safeText, Math.max(8, maxWidth - textRenderer.getWidth("..."))) + "...";
+    }
+
+    private static List<String> wrap(TextRenderer textRenderer, String text, int maxWidth, int maxLines) {
+        String safeText = text == null ? "" : text;
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < safeText.length(); i++) {
+            char c = safeText.charAt(i);
+            String candidate = current.toString() + c;
+            if (current.length() > 0 && textRenderer.getWidth(candidate) > maxWidth) {
+                lines.add(current.toString());
+                current.setLength(0);
+                if (lines.size() >= maxLines - 1) {
+                    String remainder = safeText.substring(i);
+                    lines.add(trim(textRenderer, remainder, maxWidth));
+                    return lines;
+                }
+            }
+            current.append(c);
+        }
+        if (current.length() > 0 && lines.size() < maxLines) {
+            lines.add(current.toString());
+        }
+        return lines;
     }
 
     private static int withAlpha(int color, float alpha) {

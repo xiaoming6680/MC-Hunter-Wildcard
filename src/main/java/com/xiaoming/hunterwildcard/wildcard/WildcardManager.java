@@ -5,18 +5,34 @@ import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.ui.BossBarManager;
 import com.xiaoming.hunterwildcard.ui.MessageManager;
+import com.xiaoming.hunterwildcard.wildcard.rules.BlockDecayRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.BloodRageRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.CompassChaosRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.DisabledWildcardRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.ExplosiveDeathRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.FeatherweightRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.GlowingRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.HungerChaseRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.HunterRadarRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.LightLoadRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.NightHuntRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.PearlFrenzyRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.SpeedRushRule;
 import com.xiaoming.hunterwildcard.wildcard.rules.SupplyDropRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.WeaponOverheatRule;
+import com.xiaoming.hunterwildcard.wildcard.rules.WindChargeBrawlRule;
+import net.minecraft.block.BlockState;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.item.ItemStack;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
+import net.minecraft.util.Hand;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class WildcardManager {
     private static final int WILDCARD_DRAW_DELAY_TICKS = 100;
@@ -29,7 +45,15 @@ public class WildcardManager {
             new ExplosiveDeathRule(),
             new SupplyDropRule(),
             new HunterRadarRule(),
-            new CompassChaosRule()
+            new CompassChaosRule(),
+            new HungerChaseRule(),
+            new WeaponOverheatRule(),
+            new LightLoadRule(),
+            new BlockDecayRule(),
+            new PearlFrenzyRule(),
+            new WindChargeBrawlRule(),
+            new BloodRageRule(),
+            new DisabledWildcardRule()
     );
     private final BossBarManager bossBarManager;
     private final MessageManager messageManager;
@@ -85,8 +109,38 @@ public class WildcardManager {
     }
 
     public void onPlayerDeath(GameContext context, ServerPlayerEntity player) {
-        if (activeRule != null) {
+        if (activeRule != null && isParticipant(context, player)) {
             activeRule.onPlayerDeath(context, player);
+        }
+    }
+
+    public void onEntityKilled(GameContext context, ServerPlayerEntity killer, LivingEntity killed) {
+        if (activeRule != null && isParticipant(context, killer)) {
+            activeRule.onEntityKilled(context, killer, killed);
+        }
+    }
+
+    public void onPlayerAttack(GameContext context, ServerPlayerEntity player, Entity target) {
+        if (activeRule != null && isParticipant(context, player)) {
+            activeRule.onPlayerAttack(context, player, target);
+        }
+    }
+
+    public void onPlayerAteFood(GameContext context, ServerPlayerEntity player, ItemStack eatenStack) {
+        if (activeRule != null && isParticipant(context, player)) {
+            activeRule.onPlayerAteFood(context, player, eatenStack);
+        }
+    }
+
+    public void onItemUse(GameContext context, ServerPlayerEntity player, Hand hand, ItemStack stack) {
+        if (activeRule != null && isParticipant(context, player)) {
+            activeRule.onItemUse(context, player, hand, stack);
+        }
+    }
+
+    public void onBlockPlaced(GameContext context, ServerPlayerEntity player, ServerWorld world, BlockPos pos, BlockState state) {
+        if (activeRule != null && isParticipant(context, player)) {
+            activeRule.onBlockPlaced(context, player, world, pos, state);
         }
     }
 
@@ -101,6 +155,7 @@ public class WildcardManager {
         pendingDrawTicks = 0;
         ticksUntilNextWildcard = -1;
         bossBarManager.clearWildcardBar();
+        HunterWildcardPackets.clearWildcardIntro(context);
     }
 
     public void onConfigChanged(ModConfig config) {
@@ -220,6 +275,7 @@ public class WildcardManager {
 
         activeRule.onStart(context);
         bossBarManager.updateWildcardBar(context, activeRule.getName(), activeRemainingTicks, context.getConfig().getWildcardDurationTicks());
+        HunterWildcardPackets.sendWildcardIntro(context, activeRule.getName(), activeRule.getDescription());
         messageManager.toParticipants(context, "外卡触发: " + activeRule.getName());
     }
 
@@ -244,6 +300,7 @@ public class WildcardManager {
         activeRemainingTicks = 0;
         ticksUntilNextWildcard = resetInterval ? context.getConfig().getWildcardIntervalTicks() : -1;
         bossBarManager.clearWildcardBar();
+        HunterWildcardPackets.clearWildcardIntro(context);
     }
 
     private List<WildcardRule> getEnabledRules(ModConfig config) {
@@ -254,6 +311,16 @@ public class WildcardManager {
             }
         }
         return enabledRules;
+    }
+
+    private boolean isParticipant(GameContext context, ServerPlayerEntity player) {
+        UUID playerId = player.getUuid();
+        for (ServerPlayerEntity participant : context.getParticipants()) {
+            if (participant.getUuid().equals(playerId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public record WildcardStatus(String name, boolean enabled) {

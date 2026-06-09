@@ -59,6 +59,8 @@ public class HunterWildcardConfigScreen extends Screen {
     private static final int HINT_HEIGHT = 12;
     private static final int SCROLL_STEP = 32;
     private static final int SCROLL_BAR_RESERVE = 12;
+    private static final int REALTIME_REFRESH_TICKS = 5;
+    private static final int CONFIG_IDLE_REFRESH_TICKS = 10;
     private static final long TOAST_FADE_IN_MS = 140L;
     private static final long TOAST_HOLD_MS = 1800L;
     private static final long TOAST_FADE_OUT_MS = 220L;
@@ -302,15 +304,33 @@ public class HunterWildcardConfigScreen extends Screen {
 
     @Override
     public void tick() {
-        if (isConfigEditPage()) {
+        int refreshInterval = refreshIntervalTicks();
+        if (refreshInterval <= 0) {
+            refreshTicks = 0;
             return;
         }
 
         refreshTicks++;
-        if (refreshTicks >= 20) {
+        if (refreshTicks >= refreshInterval) {
             refreshTicks = 0;
             requestConfig(false);
         }
+    }
+
+    private int refreshIntervalTicks() {
+        if (isRealtimeStatusPage()) {
+            return REALTIME_REFRESH_TICKS;
+        }
+
+        if (isConfigEditPage()) {
+            return hasUnsavedChanges() || hasVisibleInputChanges() || hasFocusedTextField() ? -1 : CONFIG_IDLE_REFRESH_TICKS;
+        }
+
+        return CONFIG_IDLE_REFRESH_TICKS;
+    }
+
+    private boolean isRealtimeStatusPage() {
+        return currentPage == Page.GAME || currentPage == Page.TEAM || currentPage == Page.DEBUG;
     }
 
     private void buildNavigation(Layout layout) {
@@ -784,7 +804,7 @@ public class HunterWildcardConfigScreen extends Screen {
             }
             case SUPPLY_DROP -> {
                 card.number(NumberField.SUPPLY_DROP_INTERVAL_SECONDS, canEditConfig());
-                card.hint("补给空投会按该间隔生成补给。");
+                card.hint("补给空投会按该间隔落下带发光轨迹和信标光柱的好坏混合随机补给箱。");
             }
             default -> card.hint("该外卡当前没有单独参数。");
         }
@@ -1047,7 +1067,7 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private String wildcardToggleTooltip(ToggleField field, boolean enabled) {
-        return field.description + " 当前状态：" + (enabled ? "开启" : "关闭") + "。";
+        return field.label + "：" + (enabled ? "已开启" : "已关闭") + "，点击切换。";
     }
 
     private boolean useTwoColumns(int usableContentWidth) {
@@ -2121,6 +2141,14 @@ public class HunterWildcardConfigScreen extends Screen {
             case SUPPLY_DROP -> config.enableSupplyDrop();
             case HUNTER_RADAR -> config.enableHunterRadar();
             case COMPASS_CHAOS -> config.enableCompassChaos();
+            case HUNGER_CHASE -> config.enableHungerChase();
+            case WEAPON_OVERHEAT -> config.enableWeaponOverheat();
+            case LIGHT_LOAD -> config.enableLightLoad();
+            case BLOCK_DECAY -> config.enableBlockDecay();
+            case PEARL_FRENZY -> config.enablePearlFrenzy();
+            case WIND_CHARGE_BRAWL -> config.enableWindChargeBrawl();
+            case BLOOD_RAGE -> config.enableBloodRage();
+            case DISABLED_WILDCARD -> config.enableDisabledWildcard();
         };
     }
 
@@ -2135,6 +2163,14 @@ public class HunterWildcardConfigScreen extends Screen {
             case SUPPLY_DROP -> copy.enableSupplyDrop = value;
             case HUNTER_RADAR -> copy.enableHunterRadar = value;
             case COMPASS_CHAOS -> copy.enableCompassChaos = value;
+            case HUNGER_CHASE -> copy.enableHungerChase = value;
+            case WEAPON_OVERHEAT -> copy.enableWeaponOverheat = value;
+            case LIGHT_LOAD -> copy.enableLightLoad = value;
+            case BLOCK_DECAY -> copy.enableBlockDecay = value;
+            case PEARL_FRENZY -> copy.enablePearlFrenzy = value;
+            case WIND_CHARGE_BRAWL -> copy.enableWindChargeBrawl = value;
+            case BLOOD_RAGE -> copy.enableBloodRage = value;
+            case DISABLED_WILDCARD -> copy.enableDisabledWildcard = value;
         }
         copy.validate();
         return ConfigSnapshot.from(copy);
@@ -2751,14 +2787,22 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private enum ToggleField {
-        SPEED_RUSH("疾速追猎", "外卡触发期间，所有参与玩家获得速度 II，外卡结束后移除速度效果。"),
-        FEATHERWEIGHT("轻盈之身", "外卡触发期间，所有参与玩家获得跳跃提升 II 和缓降，外卡结束后移除这两个效果。"),
-        GLOWING("全员发光", "外卡触发期间，所有参与玩家获得发光效果，更容易被看见；外卡结束后移除发光效果。"),
-        NIGHT_HUNT("暗夜追猎", "触发时把所有世界时间拉到夜晚，并给猎人夜视；外卡持续期间会维持夜晚和夜视。"),
-        EXPLOSIVE_DEATH("死亡爆炸", "外卡生效期间，任意参与玩家死亡时，会在死亡位置产生一次不破坏方块的爆炸。"),
-        SUPPLY_DROP("补给空投", "触发时并按配置间隔，在随机参与玩家附近生成补给箱，内含食物、箭、铁锭、金苹果、水桶和火把。"),
-        HUNTER_RADAR("猎人雷达", "外卡生效期间，猎人按配置间隔收到最近逃亡者名称和大致距离；若不在同维度会提示在其他维度。"),
-        COMPASS_CHAOS("指南针干扰", "外卡生效期间，猎人的追踪指南针目标会偏移到逃亡者附近的假位置，降低追踪精度。");
+        SPEED_RUSH("疾速追猎", "全员加速。"),
+        FEATHERWEIGHT("轻盈之身", "跳跃提升，缓慢落地。"),
+        GLOWING("全员发光", "全员发光。"),
+        NIGHT_HUNT("暗夜追猎", "入夜，猎人夜视。"),
+        EXPLOSIVE_DEATH("死亡爆炸", "死亡或击杀会爆炸。"),
+        SUPPLY_DROP("补给空投", "落下随机补给箱。"),
+        HUNTER_RADAR("猎人雷达", "猎人获得距离提示。"),
+        COMPASS_CHAOS("指南针干扰", "猎人指南针偏移。"),
+        HUNGER_CHASE("饥饿追逐", "更易饥饿，进食加速。"),
+        WEAPON_OVERHEAT("武器过热", "连打会过热。"),
+        LIGHT_LOAD("轻装上阵", "轻甲加速，重甲减速。"),
+        BLOCK_DECAY("方块腐化", "新放方块会消失。"),
+        PEARL_FRENZY("珍珠狂潮", "定期获得珍珠。"),
+        WIND_CHARGE_BRAWL("风弹乱斗", "定期获得风弹。"),
+        BLOOD_RAGE("血怒时刻", "低血量获得强化。"),
+        DISABLED_WILDCARD("暂时停用", "没有额外效果。");
 
         private final String label;
         private final String description;

@@ -18,6 +18,12 @@ public class HunterWildcardClient implements ClientModInitializer {
                 context.client().execute(() -> HunterWildcardConfigScreen.receiveOperationResult(payload)));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WILDCARD_DRAW, (payload, context) ->
                 context.client().execute(() -> WildcardDrawOverlay.start(payload.wildcardName())));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WILDCARD_INTRO, (payload, context) ->
+                context.client().execute(() -> WildcardDrawOverlay.setIntro(
+                        payload.visible(),
+                        payload.wildcardName(),
+                        payload.description()
+                )));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_HUNTER_KILL_FEEDBACK, (payload, context) ->
                 context.client().execute(() -> WildcardDrawOverlay.showKillFeedback(
                         payload.hunterName(),
@@ -32,6 +38,12 @@ public class HunterWildcardClient implements ClientModInitializer {
                         payload.line1(),
                         payload.line2(),
                         payload.style()
+                )));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WEAPON_OVERHEAT_STATUS, (payload, context) ->
+                context.client().execute(() -> WildcardDrawOverlay.setWeaponOverheat(
+                        payload.heat(),
+                        payload.maxHeat(),
+                        payload.visible()
                 )));
         HunterWildcardKeyBindings.register();
     }
