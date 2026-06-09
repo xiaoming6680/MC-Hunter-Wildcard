@@ -114,14 +114,6 @@ build/libs/hunter-wildcard-1.0.0.jar
 ```
 
 
-## GitHub 发布建议
-
-- 仓库名推荐：`hunter-wildcard`
-- 展示名推荐：`猎影外卡 (Hunter Wildcard)`
-- Release 标题示例：`猎影外卡 v1.0.0`
-- Release 附件：`hunter-wildcard-1.0.0.jar`
-- 简介：`A Fabric Minecraft Manhunt mod with teams, configurable win conditions, respawn rules, and rotating wildcard events.`
-
 ## 许可证
 
 本项目使用 MIT License，详见 [LICENSE](LICENSE)。
