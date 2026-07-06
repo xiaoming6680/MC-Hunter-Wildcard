@@ -6,6 +6,7 @@ import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.game.HunterVictoryType;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
@@ -41,7 +42,7 @@ public class RespawnManager {
 
         ModConfig config = context.getConfig();
         boolean killedByHunter = hunterKiller != null;
-        String deathPrefix = deathPrefix(player, role, hunterKiller, config);
+        Text deathPrefix = deathPrefix(player, role, hunterKiller, config);
         if (role == PlayerRole.RUNNER && killedByHunter) {
             runnerKillCount++;
             if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
@@ -57,7 +58,10 @@ public class RespawnManager {
             }
             if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT
                     && runnerKillCount >= config.hunterRunnerKillTarget) {
-                return DeathOutcome.messageAndEnd(deathPrefix + "。", "猎人累计击杀逃亡者达到 " + config.hunterRunnerKillTarget + " 次，猎人阵营获胜。");
+                return DeathOutcome.messageAndEnd(
+                        HunterWildcardText.translatable("msg.death.final", deathPrefix),
+                        HunterWildcardText.spec("msg.win.hunter.kill_target", config.hunterRunnerKillTarget)
+                );
             }
             if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
                 announceKillCountMilestone(context, config.hunterRunnerKillTarget - runnerKillCount);
@@ -67,19 +71,17 @@ public class RespawnManager {
         RespawnMode mode = modeFor(role, config);
         if (mode == RespawnMode.INFINITE) {
             scheduleRespawn(player, respawnTicksFor(role, config));
-            return DeathOutcome.message(deathPrefix + "，将在 " + respawnSecondsFor(role, config) + " 秒后复活。");
+            return DeathOutcome.message(HunterWildcardText.translatable("msg.death.respawn_scheduled", deathPrefix, respawnSecondsFor(role, config)));
         }
 
         int livesAfterDeath = mode == RespawnMode.NO_RESPAWN ? 0 : decrementLife(player, role, config);
         if (livesAfterDeath > 0) {
             scheduleRespawn(player, respawnTicksFor(role, config));
-            return DeathOutcome.message(deathPrefix
-                    + "，剩余生命 " + livesAfterDeath
-                    + "，将在 " + respawnSecondsFor(role, config) + " 秒后复活。");
+            return DeathOutcome.message(HunterWildcardText.translatable("msg.death.limited_respawn_scheduled", deathPrefix, livesAfterDeath, respawnSecondsFor(role, config)));
         }
 
         markOut(player);
-        String outMessage = deathPrefix + "，已出局。";
+        Text outMessage = HunterWildcardText.translatable("msg.death.out", deathPrefix);
         if (role == PlayerRole.RUNNER) {
             String endingReason = runnerLossReason(context, player);
             if (endingReason != null) {
@@ -93,14 +95,14 @@ public class RespawnManager {
     public void onAfterRespawn(GameContext context, ServerPlayerEntity player, CompassTracker compassTracker) {
         if (outPlayers.contains(player.getUuid())) {
             player.changeGameMode(GameMode.SPECTATOR);
-            player.sendMessage(Text.literal("你已出局，正在旁观本局游戏。"), false);
+            player.sendMessage(HunterWildcardText.translatable("msg.respawn.out_spectating"), false);
             return;
         }
 
         Integer timer = respawnTimers.get(player.getUuid());
         if (timer != null && timer > 0) {
             player.changeGameMode(GameMode.SPECTATOR);
-            player.sendMessage(Text.literal("等待复活期间，你可以在观察者模式自由选择复活地点。"), false);
+            player.sendMessage(HunterWildcardText.translatable("msg.respawn.spectator_wait"), false);
             return;
         }
 
@@ -130,8 +132,11 @@ public class RespawnManager {
                 entry.setValue(remaining);
                 if (!player.isDead()) {
                     PlayerRole role = context.getTeamManager().getRole(player);
-                    player.sendMessage(Text.literal("等待复活: " + (remaining / 20 + 1) + " 秒 | 可自由选择复活地点 | 剩余生命: "
-                            + remainingLivesText(player, role, context.getConfig())), true);
+                    player.sendMessage(HunterWildcardText.translatable(
+                            "msg.respawn.waiting_actionbar",
+                            remaining / 20 + 1,
+                            remainingLivesText(player, role, context.getConfig())
+                    ), true);
                 }
                 continue;
             }
@@ -144,12 +149,12 @@ public class RespawnManager {
                     compassTracker.giveCompass(player);
                 }
                 PlayerRole role = context.getTeamManager().getRole(player);
-                player.sendMessage(Text.literal("你已重新加入游戏。"), false);
+                player.sendMessage(HunterWildcardText.translatable("msg.respawn.rejoined"), false);
                 HunterWildcardPackets.sendHudFeedback(
                         context,
-                        "复活完成",
-                        player.getName().getString() + " 已复活",
-                        "剩余生命: " + remainingLivesText(player, role, context.getConfig()),
+                        HunterWildcardText.spec("hud.feedback.respawn.title"),
+                        HunterWildcardText.spec("hud.feedback.respawn.player", player.getName().getString()),
+                        HunterWildcardText.spec("hud.feedback.respawn.lives", remainingLivesArg(player, role, context.getConfig())),
                         feedbackStyle(role)
                 );
             }
@@ -244,7 +249,7 @@ public class RespawnManager {
     private String runnerLossReason(GameContext context, ServerPlayerEntity outRunner) {
         RunnerTeamLossMode lossMode = context.getConfig().getRunnerTeamLossMode();
         if (lossMode == RunnerTeamLossMode.ANY_RUNNER_OUT) {
-            return "逃亡者 " + outRunner.getName().getString() + " 出局，猎人阵营获胜。";
+            return HunterWildcardText.spec("msg.win.hunter.runner_out", outRunner.getName().getString());
         }
 
         for (ServerPlayerEntity runner : context.getRunners()) {
@@ -253,28 +258,27 @@ public class RespawnManager {
             }
         }
 
-        return "所有逃亡者已出局，猎人阵营获胜。";
+        return HunterWildcardText.spec("msg.win.hunter.all_runners_out");
     }
 
-    private String deathPrefix(ServerPlayerEntity player, PlayerRole role, ServerPlayerEntity hunterKiller, ModConfig config) {
+    private Text deathPrefix(ServerPlayerEntity player, PlayerRole role, ServerPlayerEntity hunterKiller, ModConfig config) {
         String playerName = player.getName().getString();
         if (role != PlayerRole.RUNNER) {
-            return role.getDisplayName() + " " + playerName + " 死亡";
+            return HunterWildcardText.translatable("msg.death.player", role.getDisplayText(), playerName);
         }
 
         if (hunterKiller != null) {
-            String prefix = "逃亡者 " + playerName + " 被 " + hunterKiller.getName().getString() + " 击杀";
             if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
-                return prefix + "，计击杀";
+                return HunterWildcardText.translatable("msg.death.runner_killed_counted", playerName, hunterKiller.getName().getString());
             }
-            return prefix;
+            return HunterWildcardText.translatable("msg.death.runner_killed", playerName, hunterKiller.getName().getString());
         }
 
         if (config.getHunterVictoryType() == HunterVictoryType.RUNNER_KILL_COUNT) {
-            return "逃亡者 " + playerName + " 死亡，不计击杀";
+            return HunterWildcardText.translatable("msg.death.runner_died_not_counted", playerName);
         }
 
-        return "逃亡者 " + playerName + " 死亡";
+        return HunterWildcardText.translatable("msg.death.runner_died", playerName);
     }
 
     private String feedbackStyle(PlayerRole role) {
@@ -292,20 +296,37 @@ public class RespawnManager {
             return;
         }
 
-        Text message = Text.literal("[猎人外卡] 猎人距离击杀数胜利还差 " + remainingKills + " 个人头。").formatted(Formatting.GOLD);
+        Text message = HunterWildcardText.prefixed(HunterWildcardText.translatable("msg.hunter.kill_target_remaining", remainingKills)).formatted(Formatting.GOLD);
         for (ServerPlayerEntity participant : context.getParticipants()) {
             participant.sendMessage(message);
         }
     }
 
-    private String remainingLivesText(ServerPlayerEntity player, PlayerRole role, ModConfig config) {
+    private Text remainingLivesText(ServerPlayerEntity player, PlayerRole role, ModConfig config) {
         if (role == null) {
-            return "未知";
+            return HunterWildcardText.translatable("common.unknown");
         }
 
         RespawnMode mode = modeFor(role, config);
         if (mode == RespawnMode.INFINITE) {
-            return "无限";
+            return HunterWildcardText.translatable("common.infinite");
+        }
+
+        if (mode == RespawnMode.NO_RESPAWN) {
+            return Text.literal("0");
+        }
+
+        return Text.literal(Integer.toString(remainingLives.getOrDefault(player.getUuid(), initialLives(role, config))));
+    }
+
+    private String remainingLivesArg(ServerPlayerEntity player, PlayerRole role, ModConfig config) {
+        if (role == null) {
+            return HunterWildcardText.key("common.unknown");
+        }
+
+        RespawnMode mode = modeFor(role, config);
+        if (mode == RespawnMode.INFINITE) {
+            return HunterWildcardText.key("common.infinite");
         }
 
         if (mode == RespawnMode.NO_RESPAWN) {
@@ -315,12 +336,12 @@ public class RespawnManager {
         return Integer.toString(remainingLives.getOrDefault(player.getUuid(), initialLives(role, config)));
     }
 
-    public record DeathOutcome(String message, String endingReason) {
+    public record DeathOutcome(Text message, String endingReason) {
         public static DeathOutcome none() {
             return new DeathOutcome(null, null);
         }
 
-        public static DeathOutcome message(String message) {
+        public static DeathOutcome message(Text message) {
             return new DeathOutcome(message, null);
         }
 
@@ -328,7 +349,7 @@ public class RespawnManager {
             return new DeathOutcome(null, endingReason);
         }
 
-        public static DeathOutcome messageAndEnd(String message, String endingReason) {
+        public static DeathOutcome messageAndEnd(Text message, String endingReason) {
             return new DeathOutcome(message, endingReason);
         }
     }

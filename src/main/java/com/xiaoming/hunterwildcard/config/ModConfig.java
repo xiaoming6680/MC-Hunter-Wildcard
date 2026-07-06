@@ -329,22 +329,22 @@ public class ModConfig {
 
     public boolean isWildcardEnabled(String ruleName) {
         return switch (ruleName) {
-            case "疾速追猎", "SpeedRush" -> enableSpeedRush;
-            case "轻盈之身", "Featherweight" -> enableFeatherweight;
-            case "全员发光", "Glowing" -> enableGlowing;
-            case "暗夜追猎", "NightHunt" -> enableNightHunt;
-            case "死亡爆炸", "ExplosiveDeath" -> enableExplosiveDeath;
-            case "补给空投", "SupplyDrop" -> enableSupplyDrop;
-            case "猎人雷达", "HunterRadar" -> enableHunterRadar;
-            case "指南针干扰", "CompassChaos" -> enableCompassChaos;
-            case "饥饿追逐", "HungerChase" -> enableHungerChase;
-            case "武器过热", "WeaponOverheat" -> enableWeaponOverheat;
-            case "轻装上阵", "LightLoad" -> enableLightLoad;
-            case "方块腐化", "BlockDecay" -> enableBlockDecay;
-            case "珍珠狂潮", "PearlFrenzy" -> enablePearlFrenzy;
-            case "风弹乱斗", "WindChargeBrawl" -> enableWindChargeBrawl;
-            case "血怒时刻", "BloodRage" -> enableBloodRage;
-            case "暂时停用", "DisabledWildcard", "NoEffect" -> enableDisabledWildcard;
+            case "speed_rush", "SpeedRush" -> enableSpeedRush;
+            case "featherweight", "Featherweight" -> enableFeatherweight;
+            case "glowing", "Glowing" -> enableGlowing;
+            case "night_hunt", "NightHunt" -> enableNightHunt;
+            case "explosive_death", "ExplosiveDeath" -> enableExplosiveDeath;
+            case "supply_drop", "SupplyDrop" -> enableSupplyDrop;
+            case "hunter_radar", "HunterRadar" -> enableHunterRadar;
+            case "compass_chaos", "CompassChaos" -> enableCompassChaos;
+            case "hunger_chase", "HungerChase" -> enableHungerChase;
+            case "weapon_overheat", "WeaponOverheat" -> enableWeaponOverheat;
+            case "light_load", "LightLoad" -> enableLightLoad;
+            case "block_decay", "BlockDecay" -> enableBlockDecay;
+            case "pearl_frenzy", "PearlFrenzy" -> enablePearlFrenzy;
+            case "wind_charge_brawl", "WindChargeBrawl" -> enableWindChargeBrawl;
+            case "blood_rage", "BloodRage" -> enableBloodRage;
+            case "disabled_wildcard", "DisabledWildcard", "NoEffect" -> enableDisabledWildcard;
             default -> false;
         };
     }

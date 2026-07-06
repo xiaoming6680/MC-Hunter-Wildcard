@@ -26,11 +26,6 @@ public class BlockDecayRule implements WildcardRule {
     private int ticks;
 
     @Override
-    public String getName() {
-        return "方块腐化";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         entries.clear();
         ticks = 0;

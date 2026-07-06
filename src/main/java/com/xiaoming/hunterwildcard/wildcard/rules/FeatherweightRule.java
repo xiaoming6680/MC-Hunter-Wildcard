@@ -8,11 +8,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 
 public class FeatherweightRule implements WildcardRule {
     @Override
-    public String getName() {
-        return "轻盈之身";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         apply(context, context.getConfig().getWildcardDurationTicks() + 40);
     }

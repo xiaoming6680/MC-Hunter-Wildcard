@@ -1,6 +1,8 @@
 package com.xiaoming.hunterwildcard.client.hud;
 
 import com.xiaoming.hunterwildcard.HunterWildcardMod;
+import com.xiaoming.hunterwildcard.client.HunterWildcardClientText;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
 import net.minecraft.client.MinecraftClient;
@@ -35,22 +37,22 @@ public class WildcardDrawOverlay {
     private static final long OBJECTIVE_NOTICE_TOTAL_MS = OBJECTIVE_NOTICE_IN_MS + OBJECTIVE_NOTICE_HOLD_MS + OBJECTIVE_NOTICE_OUT_MS;
     private static final float OBJECTIVE_PANEL_SCALE = 0.8F;
     private static final String[] SPIN_NAMES = {
-            "疾速追猎",
-            "轻盈之身",
-            "全员发光",
-            "暗夜追猎",
-            "死亡爆炸",
-            "补给空投",
-            "猎人雷达",
-            "指南针干扰",
-            "饥饿追逐",
-            "武器过热",
-            "轻装上阵",
-            "方块腐化",
-            "珍珠狂潮",
-            "风弹乱斗",
-            "血怒时刻",
-            "暂时停用"
+            "speed_rush",
+            "featherweight",
+            "glowing",
+            "night_hunt",
+            "explosive_death",
+            "supply_drop",
+            "hunter_radar",
+            "compass_chaos",
+            "hunger_chase",
+            "weapon_overheat",
+            "light_load",
+            "block_decay",
+            "pearl_frenzy",
+            "wind_charge_brawl",
+            "blood_rage",
+            "disabled_wildcard"
     };
 
     private static long drawStartTimeMs = -1L;
@@ -84,7 +86,7 @@ public class WildcardDrawOverlay {
     }
 
     public static void start(String wildcardName) {
-        finalWildcard = wildcardName == null || wildcardName.isBlank() ? "未知外卡" : wildcardName;
+        finalWildcard = wildcardName == null ? "" : wildcardName;
         drawStartTimeMs = System.currentTimeMillis();
         revealSoundPlayed = false;
 
@@ -92,18 +94,20 @@ public class WildcardDrawOverlay {
     }
 
     public static void showKillFeedback(String hunterName, String runnerName, int remainingKills, int currentKills, int targetKills) {
-        String hunter = hunterName == null || hunterName.isBlank() ? "猎人" : hunterName;
-        String runner = runnerName == null || runnerName.isBlank() ? "逃亡者" : runnerName;
+        String hunter = hunterName == null || hunterName.isBlank() ? tr(HunterWildcardText.key("role.hunter")) : hunterName;
+        String runner = runnerName == null || runnerName.isBlank() ? tr(HunterWildcardText.key("role.runner")) : runnerName;
         int remaining = Math.max(0, remainingKills);
         int current = Math.max(0, currentKills);
         int target = Math.max(1, targetKills);
-        String status = remaining <= 0 ? "击杀目标完成" : "还差 " + remaining + " 次胜利 (" + current + "/" + target + ")";
-        showFeedback("有效击杀", hunter + " -> " + runner, status, "hunter");
+        String status = remaining <= 0
+                ? HunterWildcardText.spec("hud.feedback.kill_target.complete")
+                : HunterWildcardText.spec("hud.feedback.kill_target.remaining", remaining, current, target);
+        showFeedback(HunterWildcardText.spec("hud.feedback.kill.title"), hunter + " -> " + runner, status, "hunter");
     }
 
     public static void showFeedback(String title, String line1, String line2, String style) {
         feedbackEntries.add(new FeedbackEntry(
-                title == null || title.isBlank() ? "反馈" : title,
+                title == null || title.isBlank() ? HunterWildcardText.spec("hud.feedback.default_title") : title,
                 line1 == null ? "" : line1,
                 line2 == null ? "" : line2,
                 style == null || style.isBlank() ? "neutral" : style,
@@ -215,17 +219,18 @@ public class WildcardDrawOverlay {
         MinecraftClient client = MinecraftClient.getInstance();
         TextRenderer textRenderer = client.textRenderer;
         int screenWidth = client.getWindow().getScaledWidth();
-        String title = "外卡：" + introName;
+        String introTitle = tr(HunterWildcardText.spec("hud.intro.title", wildcardDisplayName(introName)));
+        String introDescriptionText = tr(introDescription);
         int maxAvailableWidth = Math.max(80, screenWidth - 6);
         int compactWidth = Math.min(Math.min(164, maxAvailableWidth), Math.max(112, screenWidth / 2));
         int wideWidth = Math.max(compactWidth, Math.min(224, maxAvailableWidth));
-        boolean needsWide = textRenderer.getWidth(title) > compactWidth - 12
-                || (!introDescription.isBlank() && textRenderer.getWidth(introDescription) > compactWidth - 12);
+        boolean needsWide = textRenderer.getWidth(introTitle) > compactWidth - 12
+                || (!introDescriptionText.isBlank() && textRenderer.getWidth(introDescriptionText) > compactWidth - 12);
         int panelWidth = needsWide ? wideWidth : compactWidth;
         int maxDescriptionLines = needsWide ? 5 : 3;
-        List<String> descriptionLines = introDescription.isBlank()
+        List<String> descriptionLines = introDescriptionText.isBlank()
                 ? List.of()
-                : wrap(textRenderer, introDescription, panelWidth - 12, maxDescriptionLines);
+                : wrap(textRenderer, introDescriptionText, panelWidth - 12, maxDescriptionLines);
         int panelHeight = descriptionLines.isEmpty() ? 20 : 20 + descriptionLines.size() * 11;
         long elapsed = introTransitionStartTimeMs < 0L ? INTRO_SLIDE_MS : System.currentTimeMillis() - introTransitionStartTimeMs;
         if (introHiding && elapsed >= INTRO_SLIDE_MS) {
@@ -249,7 +254,7 @@ public class WildcardDrawOverlay {
         context.fill(panelX, panelY, panelX + 2, panelY + panelHeight, withAlpha(0xFF7FC2FF, alpha));
         context.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, withAlpha(0xAA7FC2FF, alpha));
 
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, title, panelWidth - 12)), panelX + 5, panelY + 3, withAlpha(0xFFFFFFFF, alpha), true);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, introTitle, panelWidth - 12)), panelX + 5, panelY + 3, withAlpha(0xFFFFFFFF, alpha), true);
         for (int i = 0; i < descriptionLines.size(); i++) {
             context.drawText(textRenderer, Text.literal(descriptionLines.get(i)), panelX + 5, panelY + 16 + i * 11, withAlpha(0xFFC9D4DE, alpha), false);
         }
@@ -269,7 +274,8 @@ public class WildcardDrawOverlay {
         int screenWidth = client.getWindow().getScaledWidth();
         int screenHeight = client.getWindow().getScaledHeight();
         int maxAvailableWidth = Math.max(96, screenWidth - 8);
-        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(objectiveText) + 42));
+        String objectiveDisplayText = tr(objectiveText);
+        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(objectiveDisplayText) + 42));
         int panelHeight = 36;
         int visualPanelWidth = scaledObjectiveSize(panelWidth);
         int visualPanelHeight = scaledObjectiveSize(panelHeight);
@@ -291,7 +297,7 @@ public class WildcardDrawOverlay {
         int panelY = objectiveBaseY(screenHeight, visualPanelHeight);
         int accent = objectiveAccent(objectiveStyle);
 
-        renderScaledObjectiveStatusPanel(context, textRenderer, panelX, panelY, panelWidth, panelHeight, accent, alpha);
+        renderScaledObjectiveStatusPanel(context, textRenderer, panelX, panelY, panelWidth, panelHeight, accent, alpha, objectiveDisplayText);
     }
 
     private static void renderObjectiveNoticePanels(DrawContext context) {
@@ -333,7 +339,8 @@ public class WildcardDrawOverlay {
         int screenWidth = client.getWindow().getScaledWidth();
         int screenHeight = client.getWindow().getScaledHeight();
         int maxAvailableWidth = Math.max(96, screenWidth - 8);
-        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(entry.message) + 42));
+        String message = tr(entry.message);
+        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(message) + 42));
         int panelHeight = 38;
         int visualPanelWidth = scaledObjectiveSize(panelWidth);
         int visualPanelHeight = scaledObjectiveSize(panelHeight);
@@ -351,10 +358,10 @@ public class WildcardDrawOverlay {
         int panelX = objectiveNoticePanelX(visualPanelWidth, entry, now);
         int accent = objectiveAccent(entry.style);
 
-        renderScaledObjectiveNoticePanel(context, textRenderer, entry, panelX, panelY, panelWidth, panelHeight, accent);
+        renderScaledObjectiveNoticePanel(context, textRenderer, entry, panelX, panelY, panelWidth, panelHeight, accent, message);
     }
 
-    private static void renderScaledObjectiveStatusPanel(DrawContext context, TextRenderer textRenderer, int panelX, int panelY, int panelWidth, int panelHeight, int accent, float alpha) {
+    private static void renderScaledObjectiveStatusPanel(DrawContext context, TextRenderer textRenderer, int panelX, int panelY, int panelWidth, int panelHeight, int accent, float alpha, String objectiveDisplayText) {
         var matrices = context.getMatrices();
         matrices.pushMatrix();
         matrices.translate(panelX, panelY);
@@ -365,12 +372,12 @@ public class WildcardDrawOverlay {
         context.fill(0, panelHeight - 1, panelWidth, panelHeight, withAlpha(accent, alpha));
 
         context.drawItem(objectiveIcon(objectiveStyle), 8, 10);
-        context.drawText(textRenderer, Text.literal("逃亡者状态"), 30, 5, withAlpha(accent, alpha), false);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, objectiveText, panelWidth - 38)), 30, 20, withAlpha(0xFFFFFFFF, alpha), true);
+        context.drawText(textRenderer, Text.literal(tr(HunterWildcardText.key("hud.objective.status_title"))), 30, 5, withAlpha(accent, alpha), false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, objectiveDisplayText, panelWidth - 38)), 30, 20, withAlpha(0xFFFFFFFF, alpha), true);
         matrices.popMatrix();
     }
 
-    private static void renderScaledObjectiveNoticePanel(DrawContext context, TextRenderer textRenderer, ObjectiveNoticeEntry entry, int panelX, int panelY, int panelWidth, int panelHeight, int accent) {
+    private static void renderScaledObjectiveNoticePanel(DrawContext context, TextRenderer textRenderer, ObjectiveNoticeEntry entry, int panelX, int panelY, int panelWidth, int panelHeight, int accent, String message) {
         var matrices = context.getMatrices();
         matrices.pushMatrix();
         matrices.translate(panelX, panelY);
@@ -381,8 +388,8 @@ public class WildcardDrawOverlay {
         context.fill(0, panelHeight - 1, panelWidth, panelHeight, accent);
 
         context.drawItem(objectiveIcon(entry.style), 8, 11);
-        context.drawText(textRenderer, Text.literal("目标提示"), 30, 5, accent, false);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.message, panelWidth - 38)), 30, 20, 0xFFFFFFFF, true);
+        context.drawText(textRenderer, Text.literal(tr(HunterWildcardText.key("hud.objective.notice_title"))), 30, 5, accent, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, message, panelWidth - 38)), 30, 20, 0xFFFFFFFF, true);
         matrices.popMatrix();
     }
 
@@ -428,7 +435,8 @@ public class WildcardDrawOverlay {
         int panelWidth = Math.min(146, Math.max(118, screenWidth - 20));
         int panelHeight = 38;
         float alpha = drawAlpha(elapsed);
-        String displayedName = displayedName(elapsed);
+        String displayedId = displayedName(elapsed);
+        String displayedName = wildcardDisplayName(displayedId);
         boolean revealed = elapsed >= DRAW_SPIN_MS;
         int accent = revealed ? 0xFF77E287 : 0xFF7FC2FF;
 
@@ -438,9 +446,9 @@ public class WildcardDrawOverlay {
 
         int iconX = panelX + 8;
         int iconY = panelY + 11;
-        context.drawItem(WildcardIcons.iconFor(displayedName), iconX, iconY);
+        context.drawItem(WildcardIcons.iconFor(displayedId), iconX, iconY);
 
-        context.drawText(textRenderer, Text.literal(revealed ? "外卡" : "抽取中"), panelX + 30, panelY + 6, withAlpha(0xFFC9D4DE, alpha), false);
+        context.drawText(textRenderer, Text.literal(tr(revealed ? HunterWildcardText.key("hud.draw.revealed") : HunterWildcardText.key("hud.draw.drawing"))), panelX + 30, panelY + 6, withAlpha(0xFFC9D4DE, alpha), false);
         context.drawText(textRenderer, Text.literal(trim(textRenderer, displayedName, panelWidth - 38)), panelX + 30, panelY + 21, withAlpha(0xFFFFFFFF, alpha), true);
     }
 
@@ -495,10 +503,13 @@ public class WildcardDrawOverlay {
         context.fill(panelX, panelY + panelHeight - 1, panelX + panelWidth, panelY + panelHeight, accent);
 
         context.drawItem(feedbackIcon(entry.style), panelX + 10, panelY + 17);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.title, panelWidth - 44)), panelX + 34, panelY + 6, accent, false);
-        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line1, panelWidth - 44)), panelX + 34, panelY + 21, 0xFFFFFFFF, true);
-        if (!entry.line2.isBlank()) {
-            context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.line2, panelWidth - 44)), panelX + 34, panelY + 36, 0xFFFFD966, false);
+        String title = tr(entry.title);
+        String line1 = tr(entry.line1);
+        String line2 = tr(entry.line2);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, title, panelWidth - 44)), panelX + 34, panelY + 6, accent, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, line1, panelWidth - 44)), panelX + 34, panelY + 21, 0xFFFFFFFF, true);
+        if (!line2.isBlank()) {
+            context.drawText(textRenderer, Text.literal(trim(textRenderer, line2, panelWidth - 44)), panelX + 34, panelY + 36, 0xFFFFD966, false);
         }
     }
 
@@ -527,6 +538,17 @@ public class WildcardDrawOverlay {
 
         int index = (int) (elapsed / 95L) % SPIN_NAMES.length;
         return SPIN_NAMES[index];
+    }
+
+    private static String wildcardDisplayName(String wildcardId) {
+        if (wildcardId == null || wildcardId.isBlank()) {
+            return tr(HunterWildcardText.key("hud.wildcard.unknown"));
+        }
+        return tr(HunterWildcardText.wildcardNameKey(wildcardId));
+    }
+
+    private static String tr(String spec) {
+        return HunterWildcardClientText.translate(spec);
     }
 
     private static float drawAlpha(long elapsed) {

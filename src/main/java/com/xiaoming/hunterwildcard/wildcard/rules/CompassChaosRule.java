@@ -8,11 +8,6 @@ import net.minecraft.world.Heightmap;
 
 public class CompassChaosRule implements WildcardRule {
     @Override
-    public String getName() {
-        return "指南针干扰";
-    }
-
-    @Override
     public BlockPos modifyCompassTarget(GameContext context, ServerPlayerEntity hunter, ServerPlayerEntity runner, BlockPos realTarget) {
         int distance = 30 + context.getRandom().nextInt(51);
         double angle = context.getRandom().nextDouble() * Math.PI * 2.0;

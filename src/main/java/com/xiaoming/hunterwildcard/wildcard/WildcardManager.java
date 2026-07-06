@@ -5,6 +5,7 @@ import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.ui.BossBarManager;
 import com.xiaoming.hunterwildcard.ui.MessageManager;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.minecraft.block.BlockState;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
@@ -156,7 +157,7 @@ public class WildcardManager {
             }
         }
 
-        messageManager.toParticipants(context, "没有可用外卡: " + ruleName);
+        messageManager.toParticipants(context, HunterWildcardText.translatable("msg.wildcard.unavailable_or_disabled", ruleName));
         return false;
     }
 
@@ -213,7 +214,7 @@ public class WildcardManager {
 
         if (candidates.isEmpty()) {
             ticksUntilNextWildcard = context.getConfig().getWildcardIntervalTicks();
-            messageManager.toParticipants(context, "没有可用外卡。");
+            messageManager.toParticipants(context, HunterWildcardText.translatable("msg.wildcard.none_available"));
             return false;
         }
 
@@ -242,13 +243,13 @@ public class WildcardManager {
 
         activeRule.onStart(context);
         bossBarManager.updateWildcardBar(context, activeRule.getName(), activeRuleRemainingTicks, context.getConfig().getWildcardDurationTicks());
-        HunterWildcardPackets.sendWildcardIntro(context, activeRule.getName(), activeRule.getDescription());
-        messageManager.toParticipants(context, "外卡触发: " + activeRule.getName());
+        HunterWildcardPackets.sendWildcardIntro(context, activeRule.getName(), activeRule.getDescriptionKey());
+        messageManager.toParticipants(context, HunterWildcardText.translatable("msg.wildcard.triggered", activeRule.getDisplayName()));
     }
 
     private void cancelPendingRule(GameContext context, boolean resetInterval) {
         if (pendingRule != null) {
-            messageManager.toParticipants(context, "外卡抽取已取消: " + pendingRule.getName());
+            messageManager.toParticipants(context, HunterWildcardText.translatable("msg.wildcard.draw_cancelled", pendingRule.getDisplayName()));
         }
 
         pendingRule = null;
@@ -259,7 +260,7 @@ public class WildcardManager {
 
     private void stopActiveRuleInternal(GameContext context, boolean resetInterval) {
         if (activeRule != null) {
-            messageManager.toParticipants(context, "外卡结束: " + activeRule.getName());
+            messageManager.toParticipants(context, HunterWildcardText.translatable("msg.wildcard.ended", activeRule.getDisplayName()));
             activeRule.onStop(context);
         }
 

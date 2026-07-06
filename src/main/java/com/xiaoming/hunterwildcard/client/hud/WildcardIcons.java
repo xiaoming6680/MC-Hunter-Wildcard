@@ -7,28 +7,28 @@ public class WildcardIcons {
     private WildcardIcons() {
     }
 
-    public static ItemStack iconFor(String wildcardName) {
-        if (wildcardName == null) {
+    public static ItemStack iconFor(String wildcardId) {
+        if (wildcardId == null) {
             return new ItemStack(Items.NETHER_STAR);
         }
 
-        return switch (wildcardName) {
-            case "疾速追猎", "SpeedRush" -> new ItemStack(Items.SUGAR);
-            case "轻盈之身", "Featherweight" -> new ItemStack(Items.FEATHER);
-            case "全员发光", "Glowing" -> new ItemStack(Items.GLOWSTONE_DUST);
-            case "暗夜追猎", "NightHunt" -> new ItemStack(Items.CLOCK);
-            case "死亡爆炸", "ExplosiveDeath" -> new ItemStack(Items.TNT);
-            case "补给空投", "SupplyDrop" -> new ItemStack(Items.CHEST);
-            case "猎人雷达", "HunterRadar" -> new ItemStack(Items.SPYGLASS);
-            case "指南针干扰", "CompassChaos" -> new ItemStack(Items.COMPASS);
-            case "饥饿追逐", "HungerChase" -> new ItemStack(Items.COOKED_BEEF);
-            case "武器过热", "WeaponOverheat" -> new ItemStack(Items.IRON_SWORD);
-            case "轻装上阵", "LightLoad" -> new ItemStack(Items.LEATHER_BOOTS);
-            case "方块腐化", "BlockDecay" -> new ItemStack(Items.CRACKED_STONE_BRICKS);
-            case "珍珠狂潮", "PearlFrenzy" -> new ItemStack(Items.ENDER_PEARL);
-            case "风弹乱斗", "WindChargeBrawl" -> new ItemStack(Items.WIND_CHARGE);
-            case "血怒时刻", "BloodRage" -> new ItemStack(Items.REDSTONE);
-            case "暂时停用", "DisabledWildcard", "NoEffect" -> new ItemStack(Items.BARRIER);
+        return switch (wildcardId) {
+            case "speed_rush", "SpeedRush" -> new ItemStack(Items.SUGAR);
+            case "featherweight", "Featherweight" -> new ItemStack(Items.FEATHER);
+            case "glowing", "Glowing" -> new ItemStack(Items.GLOWSTONE_DUST);
+            case "night_hunt", "NightHunt" -> new ItemStack(Items.CLOCK);
+            case "explosive_death", "ExplosiveDeath" -> new ItemStack(Items.TNT);
+            case "supply_drop", "SupplyDrop" -> new ItemStack(Items.CHEST);
+            case "hunter_radar", "HunterRadar" -> new ItemStack(Items.SPYGLASS);
+            case "compass_chaos", "CompassChaos" -> new ItemStack(Items.COMPASS);
+            case "hunger_chase", "HungerChase" -> new ItemStack(Items.COOKED_BEEF);
+            case "weapon_overheat", "WeaponOverheat" -> new ItemStack(Items.IRON_SWORD);
+            case "light_load", "LightLoad" -> new ItemStack(Items.LEATHER_BOOTS);
+            case "block_decay", "BlockDecay" -> new ItemStack(Items.CRACKED_STONE_BRICKS);
+            case "pearl_frenzy", "PearlFrenzy" -> new ItemStack(Items.ENDER_PEARL);
+            case "wind_charge_brawl", "WindChargeBrawl" -> new ItemStack(Items.WIND_CHARGE);
+            case "blood_rage", "BloodRage" -> new ItemStack(Items.REDSTONE);
+            case "disabled_wildcard", "DisabledWildcard", "NoEffect" -> new ItemStack(Items.BARRIER);
             default -> new ItemStack(Items.NETHER_STAR);
         };
     }

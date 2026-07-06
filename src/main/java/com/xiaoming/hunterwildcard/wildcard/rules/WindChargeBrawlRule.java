@@ -13,11 +13,6 @@ public class WindChargeBrawlRule implements WildcardRule {
     private int ticks;
 
     @Override
-    public String getName() {
-        return "风弹乱斗";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         ticks = 0;
         for (ServerPlayerEntity player : context.getParticipants()) {

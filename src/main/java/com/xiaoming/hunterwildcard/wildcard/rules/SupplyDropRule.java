@@ -144,11 +144,6 @@ public class SupplyDropRule implements WildcardRule {
     }
 
     @Override
-    public String getName() {
-        return "补给空投";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         ticks = 0;
         spawnSupplyDrop(context);

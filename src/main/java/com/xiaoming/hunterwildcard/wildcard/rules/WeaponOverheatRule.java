@@ -28,11 +28,6 @@ public class WeaponOverheatRule implements WildcardRule {
     private int ticks;
 
     @Override
-    public String getName() {
-        return "武器过热";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         ticks = 0;
         attackTicks.clear();

@@ -21,11 +21,6 @@ public class HungerChaseRule implements WildcardRule {
     private static final int HIGH_VALUE_FOOD_SPEED_TICKS = 200;
 
     @Override
-    public String getName() {
-        return "饥饿追逐";
-    }
-
-    @Override
     public void onTick(GameContext context, int remainingTicks) {
         if (remainingTicks <= 0 || remainingTicks % EXHAUSTION_INTERVAL_TICKS != 0) {
             return;

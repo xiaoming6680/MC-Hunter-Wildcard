@@ -3,6 +3,7 @@ package com.xiaoming.hunterwildcard.game;
 import com.xiaoming.hunterwildcard.command.HunterWildcardCommand;
 import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.registry.Registries;
@@ -85,7 +86,7 @@ public class WinConditionManager {
 
     public String onDragonKilled(GameContext context) {
         if (context.getConfig().getRunnerVictoryType() == RunnerVictoryType.DRAGON) {
-            return "逃亡者达成胜利目标：击败末影龙。";
+            return HunterWildcardText.spec("msg.win.runner.dragon");
         }
 
         return null;
@@ -94,7 +95,7 @@ public class WinConditionManager {
     private String checkSurviveTime(GameContext context) {
         ModConfig config = context.getConfig();
         if (runningTicks >= config.getSurviveTimeTicks()) {
-            return "逃亡者达成胜利目标：存活 " + config.surviveTimeSeconds + " 秒。";
+            return HunterWildcardText.spec("msg.win.runner.survive_time", config.surviveTimeSeconds);
         }
 
         updateSurviveObjective(context);
@@ -107,14 +108,14 @@ public class WinConditionManager {
         ModConfig config = context.getConfig();
         Identifier dimensionId = Identifier.tryParse(config.targetDimension);
         if (dimensionId == null) {
-            warnOpsOnce(context, true, "胜利目标配置无效：目标维度 ID 不合法，已跳过坐标胜利检查。");
+            warnOpsOnce(context, true, HunterWildcardText.translatable("msg.win_config.invalid_dimension_id"));
             return null;
         }
 
         RegistryKey<World> targetWorldKey = RegistryKey.of(RegistryKeys.WORLD, dimensionId);
         ServerWorld targetWorld = context.getServer().getWorld(targetWorldKey);
         if (targetWorld == null) {
-            warnOpsOnce(context, true, "胜利目标配置无效：找不到目标维度 " + config.targetDimension + "。");
+            warnOpsOnce(context, true, HunterWildcardText.translatable("msg.win_config.dimension_not_found", config.targetDimension));
             return null;
         }
 
@@ -129,8 +130,7 @@ public class WinConditionManager {
             double dy = runner.getY() - config.targetY;
             double dz = runner.getZ() - config.targetZ;
             if (dx * dx + dy * dy + dz * dz <= radiusSquared) {
-                return "逃亡者达成胜利目标：到达 " + config.targetDimension
-                        + " (" + config.targetX + ", " + config.targetY + ", " + config.targetZ + ")。";
+                return HunterWildcardText.spec("msg.win.runner.reach_location", config.targetDimension, config.targetX, config.targetY, config.targetZ);
             }
             double distanceSquared = dx * dx + dy * dy + dz * dz;
             if (distanceSquared < closestDistanceSquared) {
@@ -151,7 +151,7 @@ public class WinConditionManager {
         int total = countCollectedTargetItems(context);
         updateCollectObjective(context, total);
         if (total >= config.targetItemCount) {
-            return "逃亡者达成胜利目标：收集 " + config.targetItemCount + " 个 " + config.targetItemId + "。";
+            return HunterWildcardText.spec("msg.win.runner.collect_item", config.targetItemCount, config.targetItemId);
         }
 
         return null;
@@ -174,13 +174,13 @@ public class WinConditionManager {
             HunterWildcardPackets.sendObjectiveStatus(
                     context,
                     true,
-                    "逃亡者距胜利时长" + remainingSeconds + "秒",
+                    HunterWildcardText.spec("hud.objective.survive_remaining", remainingSeconds),
                     "time"
             );
         }
 
         if (isSurviveNoticeSecond(remainingSeconds) && announcedSurviveSeconds.add(remainingSeconds)) {
-            broadcastToAll(context, "逃亡者距胜利还差" + remainingSeconds + "秒！");
+            broadcastToAll(context, HunterWildcardText.translatable("msg.objective.survive_notice", remainingSeconds));
         }
     }
 
@@ -195,7 +195,7 @@ public class WinConditionManager {
         HunterWildcardPackets.sendObjectiveStatus(
                 context,
                 true,
-                "逃亡者已收集目标物品" + displayCount + "/" + config.targetItemCount,
+                HunterWildcardText.spec("hud.objective.collect_progress", displayCount, config.targetItemCount),
                 "item"
         );
     }
@@ -204,13 +204,13 @@ public class WinConditionManager {
         ModConfig config = context.getConfig();
         Identifier itemId = Identifier.tryParse(config.targetItemId);
         if (itemId == null) {
-            warnOpsOnce(context, false, "胜利目标配置无效：目标物品 ID 不合法，已跳过收集胜利检查。");
+            warnOpsOnce(context, false, HunterWildcardText.translatable("msg.win_config.invalid_item_id"));
             return 0;
         }
 
         Item targetItem = Registries.ITEM.getOptionalValue(itemId).orElse(null);
         if (targetItem == null) {
-            warnOpsOnce(context, false, "胜利目标配置无效：找不到目标物品 " + config.targetItemId + "。");
+            warnOpsOnce(context, false, HunterWildcardText.translatable("msg.win_config.item_not_found", config.targetItemId));
             return 0;
         }
 
@@ -233,7 +233,7 @@ public class WinConditionManager {
             targetDimensionNoticeSent = true;
             sentDimensionNotice = true;
             pendingDistanceNoticeTicks = 10;
-            HunterWildcardPackets.sendObjectiveNotice(context, "逃亡者已到达目标维度！", "coordinate");
+            HunterWildcardPackets.sendObjectiveNotice(context, HunterWildcardText.spec("hud.objective.dimension_reached"), "coordinate");
         }
 
         int crossedIndex = crossedDistanceThresholdIndex(distance);
@@ -278,7 +278,7 @@ public class WinConditionManager {
     }
 
     private void sendDistanceNotice(GameContext context, int distance) {
-        HunterWildcardPackets.sendObjectiveNotice(context, "逃亡者距离指定坐标仅剩" + distance + "格！", "coordinate");
+        HunterWildcardPackets.sendObjectiveNotice(context, HunterWildcardText.spec("hud.objective.distance_notice", distance), "coordinate");
     }
 
     private boolean isSurviveNoticeSecond(int seconds) {
@@ -304,14 +304,14 @@ public class WinConditionManager {
         return Math.max(0, (ticks + 19) / 20);
     }
 
-    private void broadcastToAll(GameContext context, String message) {
+    private void broadcastToAll(GameContext context, Text message) {
         context.getServer().getPlayerManager().broadcast(
-                Text.literal("[猎人外卡] " + message).formatted(Formatting.GOLD),
+                HunterWildcardText.prefixed(message).formatted(Formatting.GOLD),
                 false
         );
     }
 
-    private void warnOpsOnce(GameContext context, boolean dimensionWarning, String message) {
+    private void warnOpsOnce(GameContext context, boolean dimensionWarning, Text message) {
         if (dimensionWarning) {
             if (warnedInvalidDimension) {
                 return;
@@ -326,7 +326,7 @@ public class WinConditionManager {
 
         for (ServerPlayerEntity player : context.getServer().getPlayerManager().getPlayerList()) {
             if (HunterWildcardCommand.canManageGame(player.getCommandSource())) {
-                player.sendMessage(Text.literal("[猎人外卡] " + message), false);
+                player.sendMessage(HunterWildcardText.prefixed(message).formatted(Formatting.GOLD), false);
             }
         }
     }

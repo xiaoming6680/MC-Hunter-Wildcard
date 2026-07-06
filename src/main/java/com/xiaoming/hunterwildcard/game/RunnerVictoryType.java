@@ -1,21 +1,27 @@
 package com.xiaoming.hunterwildcard.game;
 
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
+
 import java.util.Locale;
 
 public enum RunnerVictoryType {
-    DRAGON("击败末影龙"),
-    SURVIVE_TIME("存活指定时间"),
-    REACH_LOCATION("到达指定坐标"),
-    COLLECT_ITEM("收集指定物品");
+    DRAGON("config.runner_victory.dragon"),
+    SURVIVE_TIME("config.runner_victory.survive_time"),
+    REACH_LOCATION("config.runner_victory.reach_location"),
+    COLLECT_ITEM("config.runner_victory.collect_item");
 
-    private final String displayName;
+    private final String keyPath;
 
-    RunnerVictoryType(String displayName) {
-        this.displayName = displayName;
+    RunnerVictoryType(String keyPath) {
+        this.keyPath = keyPath;
+    }
+
+    public String getTranslationKey() {
+        return HunterWildcardText.key(keyPath);
     }
 
     public String getDisplayName() {
-        return displayName;
+        return getTranslationKey();
     }
 
     public static RunnerVictoryType fromConfig(String value, RunnerVictoryType fallback) {

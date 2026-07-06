@@ -1,19 +1,25 @@
 package com.xiaoming.hunterwildcard.game;
 
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
+
 import java.util.Locale;
 
 public enum HunterVictoryType {
-    RUNNERS_OUT("使逃亡者出局"),
-    RUNNER_KILL_COUNT("累计击杀逃亡者");
+    RUNNERS_OUT("config.hunter_victory.runners_out"),
+    RUNNER_KILL_COUNT("config.hunter_victory.runner_kill_count");
 
-    private final String displayName;
+    private final String keyPath;
 
-    HunterVictoryType(String displayName) {
-        this.displayName = displayName;
+    HunterVictoryType(String keyPath) {
+        this.keyPath = keyPath;
+    }
+
+    public String getTranslationKey() {
+        return HunterWildcardText.key(keyPath);
     }
 
     public String getDisplayName() {
-        return displayName;
+        return getTranslationKey();
     }
 
     public static HunterVictoryType fromConfig(String value, HunterVictoryType fallback) {

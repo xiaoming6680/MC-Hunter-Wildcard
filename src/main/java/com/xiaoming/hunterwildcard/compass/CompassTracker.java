@@ -2,6 +2,7 @@ package com.xiaoming.hunterwildcard.compass;
 
 import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameContext;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import com.xiaoming.hunterwildcard.util.PlayerUtil;
 import com.xiaoming.hunterwildcard.wildcard.WildcardRule;
 import net.minecraft.component.DataComponentTypes;
@@ -19,8 +20,8 @@ import java.util.List;
 import java.util.Optional;
 
 public class CompassTracker {
-    private static final String COMPASS_NAME = "追猎指南针";
-    private static final String LEGACY_COMPASS_NAME = "猎人指南针";
+    private static final String LEGACY_TRACKING_COMPASS_NAME = "\u8FFD\u730E\u6307\u5357\u9488";
+    private static final String LEGACY_COMPASS_NAME = "\u730E\u4EBA\u6307\u5357\u9488";
     private static final String COMPASS_DATA_KEY = "hunterwildcard_compass";
 
     private int updateTicks;
@@ -165,7 +166,7 @@ public class CompassTracker {
 
     private boolean isLegacyHunterCompass(ItemStack stack) {
         String name = stack.getName().getString();
-        return (name.equals(COMPASS_NAME) || name.equals(LEGACY_COMPASS_NAME))
+        return (name.equals(LEGACY_TRACKING_COMPASS_NAME) || name.equals(LEGACY_COMPASS_NAME))
                 && Boolean.TRUE.equals(stack.get(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE));
     }
 
@@ -177,7 +178,7 @@ public class CompassTracker {
 
     private void markHunterCompass(ItemStack stack) {
         NbtComponent.set(DataComponentTypes.CUSTOM_DATA, stack, nbt -> nbt.putBoolean(COMPASS_DATA_KEY, true));
-        stack.set(DataComponentTypes.ITEM_NAME, Text.literal(COMPASS_NAME).formatted(Formatting.AQUA));
+        stack.set(DataComponentTypes.ITEM_NAME, HunterWildcardText.translatable("item.tracking_compass").formatted(Formatting.AQUA));
         stack.set(DataComponentTypes.ENCHANTMENT_GLINT_OVERRIDE, true);
     }
 }

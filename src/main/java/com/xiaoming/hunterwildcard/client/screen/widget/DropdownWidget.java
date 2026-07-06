@@ -1,5 +1,7 @@
 package com.xiaoming.hunterwildcard.client.screen.widget;
 
+import com.xiaoming.hunterwildcard.client.HunterWildcardClientText;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.minecraft.client.font.DrawnTextConsumer;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.Click;
@@ -93,7 +95,7 @@ public class DropdownWidget extends ButtonWidget {
             }
 
             int color = selected ? 0xFF7FC2FF : 0xFFFFFFFF;
-            String text = textRenderer.trimToWidth(option.displayName(), menuWidth - 14);
+            String text = textRenderer.trimToWidth(tr(option.displayName()), menuWidth - 14);
             context.drawText(textRenderer, net.minecraft.text.Text.literal(text), menuX + 7, optionY + Math.max(4, (optionHeight - textRenderer.fontHeight) / 2), color, false);
         }
     }
@@ -181,8 +183,8 @@ public class DropdownWidget extends ButtonWidget {
 
     private String titleText() {
         return label.isBlank()
-                ? selectedOption().displayName()
-                : label + "：" + selectedOption().displayName();
+                ? tr(selectedOption().displayName())
+                : tr(HunterWildcardText.spec("screen.dropdown.title", tr(label), tr(selectedOption().displayName())));
     }
 
     private Option selectedOption() {
@@ -213,6 +215,10 @@ public class DropdownWidget extends ButtonWidget {
 
     private int menuY(int menuHeight) {
         return openUp ? getY() - menuHeight - 1 : getY() + getHeight() + 1;
+    }
+
+    private static String tr(String spec) {
+        return HunterWildcardClientText.translate(spec);
     }
 
     private static boolean isInside(int x, int y, int width, int height, double mouseX, double mouseY) {

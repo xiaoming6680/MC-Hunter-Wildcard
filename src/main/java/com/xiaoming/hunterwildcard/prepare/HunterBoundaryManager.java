@@ -1,12 +1,12 @@
 package com.xiaoming.hunterwildcard.prepare;
 
 import com.xiaoming.hunterwildcard.game.GameContext;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.minecraft.network.packet.s2c.play.PositionFlag;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
 import net.minecraft.world.World;
 
 import java.util.HashMap;
@@ -30,7 +30,7 @@ public class HunterBoundaryManager {
 
         for (ServerPlayerEntity hunter : context.getHunters()) {
             recordCenter(hunter);
-            hunter.sendMessage(Text.literal("猎人准备区域已生成，边界会以粒子提示。"), false);
+            hunter.sendMessage(HunterWildcardText.translatable("msg.prepare.boundary_created"), false);
         }
     }
 
@@ -60,7 +60,7 @@ public class HunterBoundaryManager {
 
             BoundaryPosition target = lastLegalPositions.getOrDefault(uuid, center);
             teleport(hunter, context, target);
-            hunter.sendMessage(Text.literal("你不能离开猎人准备区域"), true);
+            hunter.sendMessage(HunterWildcardText.translatable("msg.prepare.boundary_blocked"), true);
         }
 
         if (showBoundary) {
@@ -104,7 +104,7 @@ public class HunterBoundaryManager {
         double dz = hunter.getZ() - center.z;
         double remaining = radius - Math.sqrt(dx * dx + dz * dz);
         if (remaining <= warnDistance) {
-            hunter.sendMessage(Text.literal("准备区域边界剩余 " + Math.max(0, (int) Math.floor(remaining)) + " 格"), true);
+            hunter.sendMessage(HunterWildcardText.translatable("msg.prepare.boundary_remaining", Math.max(0, (int) Math.floor(remaining))), true);
         }
     }
 

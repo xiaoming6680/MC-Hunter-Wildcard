@@ -11,11 +11,6 @@ public class ExplosiveDeathRule implements WildcardRule {
     private static final float EXPLOSION_POWER = 2.5F;
 
     @Override
-    public String getName() {
-        return "死亡爆炸";
-    }
-
-    @Override
     public void onPlayerDeath(GameContext context, ServerPlayerEntity player) {
         explodeAt(player);
     }

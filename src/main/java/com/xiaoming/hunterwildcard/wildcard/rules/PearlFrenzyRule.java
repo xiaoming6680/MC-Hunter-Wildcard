@@ -1,6 +1,7 @@
 package com.xiaoming.hunterwildcard.wildcard.rules;
 
 import com.xiaoming.hunterwildcard.game.GameContext;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import com.xiaoming.hunterwildcard.wildcard.WildcardRule;
 import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
@@ -9,17 +10,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
-import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 
 public class PearlFrenzyRule implements WildcardRule {
     private static final int SIDE_EFFECT_TICKS = 600;
     private int ticks;
-
-    @Override
-    public String getName() {
-        return "珍珠狂潮";
-    }
 
     @Override
     public void onStart(GameContext context) {
@@ -61,7 +56,7 @@ public class PearlFrenzyRule implements WildcardRule {
         } else if (player.getEntityWorld() instanceof ServerWorld world) {
             player.damage(world, player.getDamageSources().magic(), 2.0F);
         }
-        player.sendMessage(Text.literal("珍珠副作用触发。"), false);
+        player.sendMessage(HunterWildcardText.translatable("msg.wildcard.pearl_frenzy.side_effect"), false);
     }
 
     private void giveUpTo(ServerPlayerEntity player, Item item, int amount, int maxHeld) {

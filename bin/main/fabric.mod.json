@@ -2,8 +2,9 @@
   "schemaVersion": 1,
   "id": "hunterwildcard",
   "version": "${version}",
-  "name": "小铭的猎人外卡",
-  "description": "Minecraft Manhunt with rotating wildcard rules.",
+  "name": "Manhunt Wildcard",
+  "description": "Minecraft Manhunt with rotating wildcard events.",
+  "icon": "assets/hunterwildcard/icon.png",
   "authors": [
     "XM6680"
   ],

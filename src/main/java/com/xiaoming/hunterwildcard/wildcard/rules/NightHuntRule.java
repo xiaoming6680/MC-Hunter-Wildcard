@@ -9,11 +9,6 @@ import net.minecraft.server.world.ServerWorld;
 
 public class NightHuntRule implements WildcardRule {
     @Override
-    public String getName() {
-        return "暗夜追猎";
-    }
-
-    @Override
     public void onStart(GameContext context) {
         forceNight(context);
         giveNightVision(context, context.getConfig().getWildcardDurationTicks() + 40);

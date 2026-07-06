@@ -11,11 +11,6 @@ public class BloodRageRule implements WildcardRule {
     private static final int EFFECT_TICKS = 45;
 
     @Override
-    public String getName() {
-        return "血怒时刻";
-    }
-
-    @Override
     public void onTick(GameContext context, int remainingTicks) {
         if (remainingTicks <= 0 || remainingTicks % REFRESH_INTERVAL_TICKS != 0) {
             return;

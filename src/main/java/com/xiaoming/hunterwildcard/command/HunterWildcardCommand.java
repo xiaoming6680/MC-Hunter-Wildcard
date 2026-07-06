@@ -6,6 +6,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.xiaoming.hunterwildcard.game.GameManager;
 import com.xiaoming.hunterwildcard.network.HunterWildcardPackets;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import com.xiaoming.hunterwildcard.wildcard.WildcardManager;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.command.permission.Permission;
@@ -73,7 +74,7 @@ public class HunterWildcardCommand {
                                 }))
                         .then(CommandManager.literal("list")
                                 .executes(context -> listWildcards(context.getSource()))))
-                .then(CommandManager.literal("ts")
+                .then(CommandManager.literal("debug")
                         .requires(HunterWildcardCommand::canManageGame)
                         .then(CommandManager.argument("enabled", BoolArgumentType.bool())
                                 .executes(context -> {
@@ -81,9 +82,9 @@ public class HunterWildcardCommand {
                                     boolean enabled = BoolArgumentType.getBool(context, "enabled");
                                     GameManager.getInstance().setDebugMenuEnabled(player, enabled);
                                     HunterWildcardPackets.sendSync(player);
-                                    context.getSource().sendFeedback(() -> Text.literal(enabled
-                                            ? "已打开猎人外卡调试页。"
-                                            : "已关闭猎人外卡调试页。"), false);
+                                    context.getSource().sendFeedback(() -> HunterWildcardText.translatable(enabled
+                                            ? "command.debug_menu.enabled"
+                                            : "command.debug_menu.disabled"), false);
                                     return 1;
                                 })))
                 .then(CommandManager.literal("join")
@@ -99,7 +100,7 @@ public class HunterWildcardCommand {
                         }))
                 .then(CommandManager.literal("status")
                         .executes(context -> {
-                            context.getSource().sendFeedback(() -> Text.literal(GameManager.getInstance().getStatusText()), false);
+                            context.getSource().sendFeedback(() -> GameManager.getInstance().getStatusText(), false);
                             return 1;
                         })));
     }
@@ -113,10 +114,12 @@ public class HunterWildcardCommand {
 
     private static int listWildcards(ServerCommandSource source) {
         GameManager manager = GameManager.getInstance();
-        source.sendFeedback(() -> Text.literal("猎人外卡列表:"), false);
+        source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.list.header"), false);
         for (WildcardManager.WildcardStatus status : manager.getWildcardManager().getRuleStatuses(manager.getConfig())) {
-            String state = status.enabled() ? "开启" : "关闭";
-            source.sendFeedback(() -> Text.literal("- " + status.name() + ": " + state), false);
+            Text state = HunterWildcardText.translatable(status.enabled()
+                    ? "command.wildcard.list.enabled"
+                    : "command.wildcard.list.disabled");
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.list.entry", HunterWildcardText.wildcardName(status.name()), state), false);
         }
         return 1;
     }

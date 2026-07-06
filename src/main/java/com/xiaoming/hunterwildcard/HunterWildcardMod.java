@@ -20,6 +20,6 @@ public class HunterWildcardMod implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(SupplyDropRule::tickTrackedDrops);
         GameManager.getInstance().registerEvents();
         HunterWildcardCommand.register();
-        LOGGER.info("Hunter Wildcard loaded. Server commands registered.");
+        LOGGER.info("Manhunt Wildcard loaded. Server commands registered.");
     }
 }

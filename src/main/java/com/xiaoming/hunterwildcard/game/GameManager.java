@@ -9,6 +9,7 @@ import com.xiaoming.hunterwildcard.team.PlayerRole;
 import com.xiaoming.hunterwildcard.team.TeamManager;
 import com.xiaoming.hunterwildcard.ui.BossBarManager;
 import com.xiaoming.hunterwildcard.ui.MessageManager;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import com.xiaoming.hunterwildcard.wildcard.WildcardManager;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.entity.event.v1.ServerPlayerEvents;
@@ -120,12 +121,12 @@ public class GameManager {
 
     public void start(ServerCommandSource source) {
         if (state != GameState.WAITING) {
-            source.sendError(Text.literal("游戏已经开始或正在结束。"));
+            source.sendError(HunterWildcardText.translatable("msg.game.already_started_or_ending"));
             return;
         }
 
         if (teamManager.count(PlayerRole.HUNTER) == 0 || teamManager.count(PlayerRole.RUNNER) == 0) {
-            source.sendError(Text.literal("至少需要 1 名猎人和 1 名逃亡者。"));
+            source.sendError(HunterWildcardText.translatable("msg.game.need_teams"));
             return;
         }
 
@@ -147,35 +148,35 @@ public class GameManager {
         bossBarManager.updatePrepareBar(context(), preparingTicks, config.getPreparingTicks());
 
         HunterWildcardPackets.clearChat(server);
-        messageManager.broadcast(server, "游戏开始准备，" + config.preparingSeconds + " 秒后进入追杀阶段。");
-        source.sendFeedback(() -> Text.literal("猎人外卡已进入 PREPARING。"), true);
+        messageManager.broadcast(server, HunterWildcardText.translatable("msg.game.preparing_started", config.preparingSeconds));
+        source.sendFeedback(() -> HunterWildcardText.translatable("command.start.preparing"), true);
     }
 
     public void stop(ServerCommandSource source) {
         MinecraftServer currentServer = source.getServer();
         if (state == GameState.WAITING && teamManager.count(PlayerRole.HUNTER) == 0 && teamManager.count(PlayerRole.RUNNER) == 0) {
-            source.sendFeedback(() -> Text.literal("当前没有正在进行的猎人外卡游戏。"), false);
+            source.sendFeedback(() -> HunterWildcardText.translatable("msg.game.none_running"), false);
             return;
         }
 
         cleanupAndReset(currentServer);
-        messageManager.broadcast(currentServer, "游戏已由管理员停止，状态已清理。");
-        source.sendFeedback(() -> Text.literal("猎人外卡已停止。"), true);
+        messageManager.broadcast(currentServer, HunterWildcardText.translatable("msg.game.stopped_by_admin"));
+        source.sendFeedback(() -> HunterWildcardText.translatable("command.stop.stopped"), true);
     }
 
     public void join(ServerPlayerEntity player, PlayerRole role) {
         if (state != GameState.WAITING) {
-            messageManager.direct(player, "游戏已经开始，当前不能更换队伍。");
+            messageManager.direct(player, HunterWildcardText.translatable("msg.team.cannot_switch_started"));
             return;
         }
 
         teamManager.join(player, role);
-        messageManager.direct(player, "你已加入 " + role.getDisplayName() + " 队伍。");
+        messageManager.direct(player, HunterWildcardText.translatable("msg.team.joined", role.getDisplayText()));
     }
 
     public void leave(ServerPlayerEntity player) {
         if (state != GameState.WAITING) {
-            messageManager.direct(player, "游戏已经开始，当前不能离开队伍。");
+            messageManager.direct(player, HunterWildcardText.translatable("msg.team.cannot_leave_started"));
             return;
         }
 
@@ -184,24 +185,26 @@ public class GameManager {
         hunterBoundaryManager.remove(player);
         compassTracker.removeCompass(player);
         if (oldRole == null) {
-            messageManager.direct(player, "你当前不在游戏队伍中。");
+            messageManager.direct(player, HunterWildcardText.translatable("msg.team.not_in_team"));
             return;
         }
 
-        messageManager.direct(player, "你已离开 " + oldRole.getDisplayName() + " 队伍。");
+        messageManager.direct(player, HunterWildcardText.translatable("msg.team.left", oldRole.getDisplayText()));
         checkWinConditions();
     }
 
-    public String getStatusText() {
+    public Text getStatusText() {
         String wildcardName = wildcardManager.getActiveRuleName();
-        if (wildcardName == null) {
-            wildcardName = "无";
-        }
-
-        return "猎人外卡状态: " + state
-                + " | 猎人 " + teamManager.count(PlayerRole.HUNTER)
-                + " | 逃亡者 " + teamManager.count(PlayerRole.RUNNER)
-                + " | 当前外卡 " + wildcardName;
+        Text wildcardText = wildcardName == null
+                ? HunterWildcardText.translatable("common.none")
+                : HunterWildcardText.wildcardName(wildcardName);
+        return HunterWildcardText.translatable(
+                "command.status",
+                HunterWildcardText.translatable("state." + state.name().toLowerCase()),
+                teamManager.count(PlayerRole.HUNTER),
+                teamManager.count(PlayerRole.RUNNER),
+                wildcardText
+        );
     }
 
     public GameState getState() {
@@ -273,36 +276,36 @@ public class GameManager {
 
     public void reloadConfig(ServerCommandSource source) {
         if (reloadConfig()) {
-            source.sendFeedback(() -> Text.literal("已重新读取 config/hunterwildcard.json。"), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.config.reload.success"), true);
         } else {
-            source.sendError(Text.literal("游戏开始后不能重新加载配置。"));
+            source.sendError(HunterWildcardText.translatable("msg.config.cannot_reload_started"));
         }
     }
 
     public void saveConfig(ServerCommandSource source) {
         if (state != GameState.WAITING) {
-            source.sendError(Text.literal("游戏开始后不能保存配置。"));
+            source.sendError(HunterWildcardText.translatable("msg.config.cannot_save_started"));
             return;
         }
 
         if (saveConfig()) {
-            source.sendFeedback(() -> Text.literal("已保存 config/hunterwildcard.json。"), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.config.save.success"), true);
         } else {
-            source.sendError(Text.literal("保存配置失败，请检查服务器日志。"));
+            source.sendError(HunterWildcardText.translatable("msg.config.save_failed"));
         }
     }
 
     public void rollWildcard(ServerCommandSource source) {
         if (state != GameState.RUNNING) {
-            source.sendError(Text.literal("只有 RUNNING 阶段可以手动触发外卡。"));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.roll_requires_running"));
             return;
         }
 
         boolean started = wildcardManager.rollNow(context());
         if (started) {
-            source.sendFeedback(() -> Text.literal("已手动随机触发外卡。"), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.roll.success"), true);
         } else {
-            source.sendError(Text.literal("没有可用外卡。"));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.none_available"));
         }
     }
 
@@ -313,23 +316,23 @@ public class GameManager {
         if (started) {
             server = targetServer;
             wildcardTestPlayerUuid = tester.getUuid();
-            source.sendFeedback(() -> Text.literal("已测试触发外卡: " + wildcardName), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.test.success", HunterWildcardText.wildcardName(wildcardName)), true);
         } else {
-            source.sendError(Text.literal("该外卡不可用或已关闭: " + wildcardName));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.unavailable_or_disabled", Text.literal(wildcardName)));
         }
     }
 
     public void stopWildcard(ServerCommandSource source) {
         if (state != GameState.RUNNING) {
-            source.sendError(Text.literal("只有 RUNNING 阶段可以停止外卡。"));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.stop_requires_running"));
             return;
         }
 
         boolean stopped = wildcardManager.stopActiveRule(context());
         if (stopped) {
-            source.sendFeedback(() -> Text.literal("已停止当前外卡。"), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.stop.success"), true);
         } else {
-            source.sendError(Text.literal("当前没有正在运行的外卡。"));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.none_running"));
         }
     }
 
@@ -338,9 +341,9 @@ public class GameManager {
         boolean stopped = wildcardManager.stopActiveRule(testContext);
         if (stopped) {
             wildcardTestPlayerUuid = null;
-            source.sendFeedback(() -> Text.literal("已停止当前外卡。"), true);
+            source.sendFeedback(() -> HunterWildcardText.translatable("command.wildcard.stop.success"), true);
         } else {
-            source.sendError(Text.literal("当前没有正在运行的外卡。"));
+            source.sendError(HunterWildcardText.translatable("msg.wildcard.none_running"));
         }
     }
 
@@ -392,7 +395,7 @@ public class GameManager {
         winConditionManager.start(context);
         wildcardManager.reset();
         compassTracker.giveCompasses(context);
-        messageManager.broadcast(server, "RUNNING 阶段开始，猎人开始追踪逃亡者。");
+        messageManager.broadcast(server, HunterWildcardText.translatable("msg.game.running_started"));
     }
 
     private void tickRunning() {
@@ -421,8 +424,8 @@ public class GameManager {
                 }
 
                 PlayerRole role = teamManager.getRole(player);
-                String roleName = role == null ? "旁观" : role.getDisplayName();
-                messageManager.actionBar(player, "RUNNING | 你的身份: " + roleName);
+                Text roleName = role == null ? HunterWildcardText.translatable("role.spectator") : role.getDisplayText();
+                messageManager.actionBar(player, HunterWildcardText.translatable("hud.actionbar.running_role", roleName));
             }
         }
     }
@@ -452,9 +455,9 @@ public class GameManager {
         if (role == PlayerRole.HUNTER && runnerKiller != null) {
             HunterWildcardPackets.sendHudFeedback(
                     context,
-                    "反杀！",
+                    HunterWildcardText.spec("hud.feedback.counter_kill.title"),
                     runnerKiller.getName().getString() + " -> " + player.getName().getString(),
-                    "猎人被击杀",
+                    HunterWildcardText.spec("hud.feedback.counter_kill.subtitle"),
                     "runner"
             );
         }
@@ -599,12 +602,12 @@ public class GameManager {
         }
 
         if (teamManager.getRunners(server).isEmpty()) {
-            enterEnding("没有在线逃亡者，猎人阵营获胜。");
+            enterEnding(HunterWildcardText.spec("msg.win.no_online_runners"));
             return;
         }
 
         if (teamManager.getHunters(server).isEmpty()) {
-            enterEnding("没有在线猎人，逃亡者阵营获胜。");
+            enterEnding(HunterWildcardText.spec("msg.win.no_online_hunters"));
         }
     }
 
@@ -634,27 +637,31 @@ public class GameManager {
         }
 
         boolean runnerWin = winningSide == WinningSide.RUNNERS;
-        String title = runnerWin ? "逃亡者胜利" : "猎人胜利";
+        String title = runnerWin
+                ? HunterWildcardText.spec("hud.feedback.runner_victory.title")
+                : HunterWildcardText.spec("hud.feedback.hunter_victory.title");
         String style = runnerWin ? "runner" : "hunter";
-        HunterWildcardPackets.sendHudFeedback(server, title, compactEndingReason(reason), "本局进入结算", style);
+        HunterWildcardPackets.sendHudFeedback(server, title, compactEndingReason(reason), HunterWildcardText.spec("hud.feedback.ending.line2"), style);
     }
 
     private WinningSide classifyWinner(String reason) {
-        String text = reason == null ? "" : reason;
-        if (text.contains("逃亡者阵营获胜") || text.startsWith("逃亡者达成胜利目标")) {
+        String key = specKey(reason);
+        if (key.equals(HunterWildcardText.key("msg.win.no_online_hunters"))
+                || key.startsWith(HunterWildcardText.key("msg.win.runner."))) {
             return WinningSide.RUNNERS;
         }
-        if (text.contains("猎人阵营获胜") || text.startsWith("猎人累计击杀") || text.contains("所有逃亡者已出局")) {
+        if (key.equals(HunterWildcardText.key("msg.win.no_online_runners"))
+                || key.startsWith(HunterWildcardText.key("msg.win.hunter."))) {
             return WinningSide.HUNTERS;
         }
         return WinningSide.NONE;
     }
 
     private void sendEndingSummary(GameContext context, String reason, WinningSide winningSide) {
-        String winnerName = switch (winningSide) {
-            case HUNTERS -> "猎人阵营";
-            case RUNNERS -> "逃亡者阵营";
-            case NONE -> "未判定";
+        Text winnerName = switch (winningSide) {
+            case HUNTERS -> HunterWildcardText.translatable("team.hunters");
+            case RUNNERS -> HunterWildcardText.translatable("team.runners");
+            case NONE -> HunterWildcardText.translatable("common.undecided");
         };
         Formatting winnerColor = switch (winningSide) {
             case HUNTERS -> Formatting.RED;
@@ -664,25 +671,31 @@ public class GameManager {
         List<ServerPlayerEntity> hunters = context.getHunters();
         List<ServerPlayerEntity> runners = context.getRunners();
         String wildcardName = wildcardManager.getActiveRuleName();
-        if (wildcardName == null || wildcardName.isBlank()) {
-            wildcardName = "无";
-        }
+        Text wildcardText = wildcardName == null || wildcardName.isBlank()
+                ? HunterWildcardText.translatable("common.none")
+                : HunterWildcardText.wildcardName(wildcardName);
 
-        broadcastEndingLine(Text.literal(""));
-        broadcastEndingLine(Text.literal("========== 猎人外卡 | 本局结算 ==========").formatted(Formatting.GOLD, Formatting.BOLD));
-        broadcastEndingLine(Text.literal("胜利阵营: ").formatted(Formatting.GRAY)
-                .append(Text.literal(winnerName).formatted(winnerColor, Formatting.BOLD)));
-        broadcastEndingLine(Text.literal("胜利原因: ").formatted(Formatting.GRAY)
-                .append(Text.literal(reason == null || reason.isBlank() ? "未提供原因" : reason).formatted(Formatting.WHITE)));
-        broadcastEndingLine(Text.literal("本局外卡: ").formatted(Formatting.GRAY)
-                .append(Text.literal(wildcardName).formatted(Formatting.YELLOW)));
-        broadcastEndingLine(Text.literal("在线人数: ").formatted(Formatting.GRAY)
-                .append(Text.literal("猎人 " + hunters.size() + " | 逃亡者 " + runners.size()).formatted(Formatting.WHITE)));
-        broadcastEndingLine(Text.literal("猎人: ").formatted(Formatting.RED)
-                .append(Text.literal(formatPlayerNames(hunters)).formatted(Formatting.WHITE)));
-        broadcastEndingLine(Text.literal("逃亡者: ").formatted(Formatting.AQUA)
-                .append(Text.literal(formatPlayerNames(runners)).formatted(Formatting.WHITE)));
-        broadcastEndingLine(Text.literal("========================================").formatted(Formatting.GOLD));
+        broadcastEndingLine(Text.empty());
+        broadcastEndingLine(HunterWildcardText.translatable("msg.ending.summary.header").formatted(Formatting.GOLD, Formatting.BOLD));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.winner.label").formatted(Formatting.GRAY))
+                .append(winnerName.copy().formatted(winnerColor, Formatting.BOLD)));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.reason.label").formatted(Formatting.GRAY))
+                .append((reason == null || reason.isBlank() ? HunterWildcardText.translatable("common.no_reason") : HunterWildcardText.fromSpec(reason)).copy().formatted(Formatting.WHITE)));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.wildcard.label").formatted(Formatting.GRAY))
+                .append(wildcardText.copy().formatted(Formatting.YELLOW)));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.online.label").formatted(Formatting.GRAY))
+                .append(HunterWildcardText.translatable("msg.ending.summary.online.value", hunters.size(), runners.size()).formatted(Formatting.WHITE)));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.hunters.label").formatted(Formatting.RED))
+                .append(formatPlayerNames(hunters).copy().formatted(Formatting.WHITE)));
+        broadcastEndingLine(Text.empty()
+                .append(HunterWildcardText.translatable("msg.ending.summary.runners.label").formatted(Formatting.AQUA))
+                .append(formatPlayerNames(runners).copy().formatted(Formatting.WHITE)));
+        broadcastEndingLine(HunterWildcardText.translatable("msg.ending.summary.footer").formatted(Formatting.GOLD));
     }
 
     private void broadcastEndingLine(Text text) {
@@ -691,23 +704,23 @@ public class GameManager {
         }
     }
 
-    private String formatPlayerNames(List<ServerPlayerEntity> players) {
+    private Text formatPlayerNames(List<ServerPlayerEntity> players) {
         if (players.isEmpty()) {
-            return "无在线玩家";
+            return HunterWildcardText.translatable("msg.ending.summary.no_online_players");
         }
 
         int displayed = Math.min(players.size(), 6);
-        StringBuilder names = new StringBuilder();
+        var names = Text.empty();
         for (int i = 0; i < displayed; i++) {
             if (i > 0) {
-                names.append(", ");
+                names.append(Text.literal(", "));
             }
-            names.append(players.get(i).getName().getString());
+            names.append(players.get(i).getName());
         }
         if (players.size() > displayed) {
-            names.append(" 等 ").append(players.size()).append(" 人");
+            names.append(HunterWildcardText.translatable("msg.ending.summary.more_players", players.size()));
         }
-        return names.toString();
+        return names;
     }
 
     private void launchWinnerFireworks(GameContext context, WinningSide winningSide) {
@@ -750,20 +763,42 @@ public class GameManager {
     }
 
     private String compactEndingReason(String reason) {
-        String text = reason == null ? "" : reason.replace("。", "");
-        if (text.startsWith("逃亡者达成胜利目标：")) {
-            text = text.substring("逃亡者达成胜利目标：".length());
-        } else if (text.startsWith("猎人累计击杀逃亡者达到")) {
-            text = "击杀目标完成";
-        } else if (text.contains("所有逃亡者已出局")) {
-            text = "逃亡者全员出局";
-        } else if (text.contains("没有在线逃亡者")) {
-            text = "逃亡者离线";
-        } else if (text.contains("没有在线猎人")) {
-            text = "猎人离线";
+        String key = specKey(reason);
+        if (key.equals(HunterWildcardText.key("msg.win.runner.dragon"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.dragon");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.runner.survive_time"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.survive_time");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.runner.reach_location"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.reach_location");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.runner.collect_item"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.collect_item");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.hunter.kill_target"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.kill_target_complete");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.hunter.all_runners_out"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.all_runners_out");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.no_online_runners"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.runners_offline");
+        }
+        if (key.equals(HunterWildcardText.key("msg.win.no_online_hunters"))) {
+            return HunterWildcardText.spec("hud.feedback.reason.hunters_offline");
         }
 
-        return text.length() > 28 ? text.substring(0, 28) + "..." : text;
+        return reason == null ? "" : reason;
+    }
+
+    private String specKey(String spec) {
+        if (spec == null || spec.isBlank()) {
+            return "";
+        }
+
+        int separator = spec.indexOf(HunterWildcardText.SPEC_SEPARATOR);
+        return separator < 0 ? spec : spec.substring(0, separator);
     }
 
     private void cleanupAndReset(MinecraftServer cleanupServer) {

@@ -1,16 +1,27 @@
 package com.xiaoming.hunterwildcard.team;
 
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
+import net.minecraft.text.Text;
+
 public enum PlayerRole {
-    HUNTER("猎人"),
-    RUNNER("逃亡者");
+    HUNTER("role.hunter"),
+    RUNNER("role.runner");
 
-    private final String displayName;
+    private final String keyPath;
 
-    PlayerRole(String displayName) {
-        this.displayName = displayName;
+    PlayerRole(String keyPath) {
+        this.keyPath = keyPath;
+    }
+
+    public String getTranslationKey() {
+        return HunterWildcardText.key(keyPath);
     }
 
     public String getDisplayName() {
-        return displayName;
+        return getTranslationKey();
+    }
+
+    public Text getDisplayText() {
+        return Text.translatable(getTranslationKey());
     }
 }

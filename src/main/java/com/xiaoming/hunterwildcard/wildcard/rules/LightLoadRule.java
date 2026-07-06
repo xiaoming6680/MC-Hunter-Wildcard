@@ -21,11 +21,6 @@ public class LightLoadRule implements WildcardRule {
     };
 
     @Override
-    public String getName() {
-        return "轻装上阵";
-    }
-
-    @Override
     public void onTick(GameContext context, int remainingTicks) {
         if (remainingTicks <= 0 || remainingTicks % REFRESH_INTERVAL_TICKS != 0) {
             return;

@@ -7,6 +7,7 @@ import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.game.GameManager;
 import com.xiaoming.hunterwildcard.game.GameState;
 import com.xiaoming.hunterwildcard.team.PlayerRole;
+import com.xiaoming.hunterwildcard.util.HunterWildcardText;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.RegistryByteBuf;
@@ -164,8 +165,8 @@ public class HunterWildcardPackets {
         }
     }
 
-    public static void sendWildcardIntro(GameContext context, String wildcardName, String description) {
-        WildcardIntroPayload payload = new WildcardIntroPayload(wildcardName, description, true);
+    public static void sendWildcardIntro(GameContext context, String wildcardId, String descriptionSpec) {
+        WildcardIntroPayload payload = new WildcardIntroPayload(wildcardId, descriptionSpec, true);
         for (ServerPlayerEntity player : context.getParticipants()) {
             if (ServerPlayNetworking.canSend(player, S2C_WILDCARD_INTRO)) {
                 ServerPlayNetworking.send(player, payload);
@@ -258,7 +259,7 @@ public class HunterWildcardPackets {
         GameManager manager = GameManager.getInstance();
         String activeWildcard = manager.getWildcardManager().getActiveRuleName();
         if (activeWildcard == null) {
-            activeWildcard = "无";
+            activeWildcard = "";
         }
 
         PlayerRole playerRole = manager.getTeamManager().getRole(player);
@@ -269,7 +270,7 @@ public class HunterWildcardPackets {
                 manager.getTeamManager().count(PlayerRole.HUNTER),
                 manager.getTeamManager().count(PlayerRole.RUNNER),
                 activeWildcard,
-                playerRole == null ? "未加入" : playerRole.getDisplayName(),
+                playerRole == null ? HunterWildcardText.key("role.not_joined") : playerRole.getDisplayName(),
                 playerRole != null,
                 manager.getWildcardManager().hasRuleInProgress(),
                 ticksToSeconds(manager.getPhaseRemainingTicks()),
@@ -289,18 +290,18 @@ public class HunterWildcardPackets {
 
         GameManager manager = GameManager.getInstance();
         if (manager.getState() != GameState.WAITING) {
-            fail(player, "游戏开始后不能编辑配置。");
+            fail(player, HunterWildcardText.spec("msg.config.cannot_edit_started"));
             return;
         }
 
         manager.applyConfig(snapshot.toConfig());
         if (manager.saveConfig()) {
-            String message = "配置已保存。";
-            manager.getMessageManager().direct(player, message);
+            String message = HunterWildcardText.spec("msg.config.saved");
+            manager.getMessageManager().directSpec(player, message);
             syncAllAndResult(player, true, message);
         } else {
-            String message = "保存配置失败，请检查服务器日志。";
-            player.sendMessage(Text.literal(message), false);
+            String message = HunterWildcardText.spec("msg.config.save_failed");
+            player.sendMessage(HunterWildcardText.fromSpec(message), false);
             syncAllAndResult(player, false, message);
         }
     }
@@ -313,12 +314,12 @@ public class HunterWildcardPackets {
 
         GameManager manager = GameManager.getInstance();
         if (!manager.reloadConfig()) {
-            fail(player, "游戏开始后不能重新加载配置。");
+            fail(player, HunterWildcardText.spec("msg.config.cannot_reload_started"));
             return;
         }
 
-        String message = "配置已重新加载。";
-        manager.getMessageManager().direct(player, message);
+        String message = HunterWildcardText.spec("msg.config.reloaded");
+        manager.getMessageManager().directSpec(player, message);
         syncAllAndResult(player, true, message);
     }
 
@@ -330,7 +331,7 @@ public class HunterWildcardPackets {
 
         GameManager manager = GameManager.getInstance();
         if (!manager.isDebugMenuEnabled(player)) {
-            fail(player, "请先使用 /hw ts true 打开调试页。");
+            fail(player, HunterWildcardText.spec("msg.debug_menu.required"));
             return;
         }
 
@@ -343,26 +344,28 @@ public class HunterWildcardPackets {
                 }
                 manager.start(player.getCommandSource());
                 closeConfigScreens(player.getEntityWorld().getServer());
-                syncAllAndResult(player, true, "游戏已开始准备。");
+                syncAllAndResult(player, true, HunterWildcardText.spec("msg.game.preparing_started_short"));
             }
             case STOP_GAME -> {
                 boolean hadGame = canStopGame(manager);
                 manager.stop(player.getCommandSource());
-                syncAllAndResult(player, hadGame, hadGame ? "游戏已停止。" : "当前没有正在进行的猎人外卡游戏。");
+                syncAllAndResult(player, hadGame, hadGame ? HunterWildcardText.spec("msg.game.stopped") : HunterWildcardText.spec("msg.game.none_running"));
             }
             case ROLL_WILDCARD -> {
                 if (manager.getState() != GameState.RUNNING) {
-                    fail(player, "只有 RUNNING 阶段可以手动触发外卡。");
+                    fail(player, HunterWildcardText.spec("msg.wildcard.roll_requires_running"));
                     return;
                 }
                 manager.rollWildcard(player.getCommandSource());
                 String activeRule = manager.getWildcardManager().getActiveRuleName();
-                syncAllAndResult(player, activeRule != null, activeRule == null ? "没有可用外卡。" : "已随机触发外卡: " + activeRule);
+                syncAllAndResult(player, activeRule != null, activeRule == null
+                        ? HunterWildcardText.spec("msg.wildcard.none_available")
+                        : HunterWildcardText.spec("msg.wildcard.random_triggered", HunterWildcardText.wildcardNameKey(activeRule)));
             }
             case STOP_WILDCARD -> {
                 boolean hadWildcard = manager.getWildcardManager().hasRuleInProgress();
                 manager.debugStopWildcard(player.getCommandSource());
-                syncAllAndResult(player, hadWildcard, hadWildcard ? "已停止当前外卡。" : "当前没有正在运行的外卡。");
+                syncAllAndResult(player, hadWildcard, hadWildcard ? HunterWildcardText.spec("msg.wildcard.stopped") : HunterWildcardText.spec("msg.wildcard.none_running"));
             }
         }
     }
@@ -375,14 +378,16 @@ public class HunterWildcardPackets {
 
         GameManager manager = GameManager.getInstance();
         if (!manager.isDebugMenuEnabled(player)) {
-            fail(player, "请先使用 /hw ts true 打开调试页。");
+            fail(player, HunterWildcardText.spec("msg.debug_menu.required"));
             return;
         }
 
         manager.testWildcard(player.getCommandSource(), wildcardName, player);
         String activeRule = manager.getWildcardManager().getActiveRuleName();
         boolean success = activeRule != null && activeRule.equals(wildcardName);
-        syncAllAndResult(player, success, success ? "已测试触发外卡: " + wildcardName : "该外卡不可用或已关闭: " + wildcardName);
+        syncAllAndResult(player, success, success
+                ? HunterWildcardText.spec("msg.wildcard.test_triggered", HunterWildcardText.wildcardNameKey(wildcardName))
+                : HunterWildcardText.spec("msg.wildcard.unavailable_or_disabled", wildcardName));
     }
 
     private static void handleTeamAction(ServerPlayerEntity player, TeamAction action) {
@@ -391,8 +396,8 @@ public class HunterWildcardPackets {
         boolean canChangeTeam = manager.getState() == GameState.WAITING;
         if (!canChangeTeam) {
             String message = action == TeamAction.LEAVE
-                    ? "游戏已经开始，当前不能离开队伍。"
-                    : "游戏已经开始，当前不能更换队伍。";
+                    ? HunterWildcardText.spec("msg.team.cannot_leave_started")
+                    : HunterWildcardText.spec("msg.team.cannot_switch_started");
             fail(player, message);
             return;
         }
@@ -403,9 +408,11 @@ public class HunterWildcardPackets {
             case LEAVE -> manager.leave(player);
         }
         switch (action) {
-            case JOIN_HUNTER -> syncAllAndResult(player, true, "已加入猎人队伍。");
-            case JOIN_RUNNER -> syncAllAndResult(player, true, "已加入逃亡者队伍。");
-            case LEAVE -> syncAllAndResult(player, previousRole != null, previousRole == null ? "你当前不在游戏队伍中。" : "已离开 " + previousRole.getDisplayName() + " 队伍。");
+            case JOIN_HUNTER -> syncAllAndResult(player, true, HunterWildcardText.spec("msg.team.joined", PlayerRole.HUNTER.getTranslationKey()));
+            case JOIN_RUNNER -> syncAllAndResult(player, true, HunterWildcardText.spec("msg.team.joined", PlayerRole.RUNNER.getTranslationKey()));
+            case LEAVE -> syncAllAndResult(player, previousRole != null, previousRole == null
+                    ? HunterWildcardText.spec("msg.team.not_in_team")
+                    : HunterWildcardText.spec("msg.team.left", previousRole.getTranslationKey()));
         }
     }
 
@@ -425,41 +432,43 @@ public class HunterWildcardPackets {
                 }
                 manager.start(player.getCommandSource());
                 closeConfigScreens(player.getEntityWorld().getServer());
-                syncAllAndResult(player, true, "游戏已开始准备。");
+                syncAllAndResult(player, true, HunterWildcardText.spec("msg.game.preparing_started_short"));
             }
             case STOP_GAME -> {
                 boolean hadGame = canStopGame(manager);
                 manager.stop(player.getCommandSource());
-                syncAllAndResult(player, hadGame, hadGame ? "游戏已停止。" : "当前没有正在进行的猎人外卡游戏。");
+                syncAllAndResult(player, hadGame, hadGame ? HunterWildcardText.spec("msg.game.stopped") : HunterWildcardText.spec("msg.game.none_running"));
             }
             case ROLL_WILDCARD -> {
                 if (manager.getState() != GameState.RUNNING) {
-                    fail(player, "只有 RUNNING 阶段可以手动触发外卡。");
+                    fail(player, HunterWildcardText.spec("msg.wildcard.roll_requires_running"));
                     return;
                 }
                 manager.rollWildcard(player.getCommandSource());
                 String activeRule = manager.getWildcardManager().getActiveRuleName();
-                syncAllAndResult(player, activeRule != null, activeRule == null ? "没有可用外卡。" : "已随机触发外卡: " + activeRule);
+                syncAllAndResult(player, activeRule != null, activeRule == null
+                        ? HunterWildcardText.spec("msg.wildcard.none_available")
+                        : HunterWildcardText.spec("msg.wildcard.random_triggered", HunterWildcardText.wildcardNameKey(activeRule)));
             }
         }
     }
 
     private static void reject(ServerPlayerEntity player) {
-        fail(player, "你没有权限执行该操作。");
+        fail(player, HunterWildcardText.spec("msg.permission.denied"));
     }
 
-    private static void fail(ServerPlayerEntity player, String message) {
-        GameManager.getInstance().getMessageManager().direct(player, message);
-        sendSyncAndResult(player, false, message);
+    private static void fail(ServerPlayerEntity player, String messageSpec) {
+        GameManager.getInstance().getMessageManager().directSpec(player, messageSpec);
+        sendSyncAndResult(player, false, messageSpec);
     }
 
     private static String validateStartGame(GameManager manager) {
         if (manager.getState() != GameState.WAITING) {
-            return "游戏已经开始或正在结束。";
+            return HunterWildcardText.spec("msg.game.already_started_or_ending");
         }
 
         if (manager.getTeamManager().count(PlayerRole.HUNTER) == 0 || manager.getTeamManager().count(PlayerRole.RUNNER) == 0) {
-            return "至少需要 1 名猎人和 1 名逃亡者。";
+            return HunterWildcardText.spec("msg.game.need_teams");
         }
 
         return null;
