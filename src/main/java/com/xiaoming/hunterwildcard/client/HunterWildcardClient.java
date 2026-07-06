@@ -16,6 +16,10 @@ public class HunterWildcardClient implements ClientModInitializer {
                 context.client().execute(() -> HunterWildcardConfigScreen.receiveSync(payload)));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_OPERATION_RESULT, (payload, context) ->
                 context.client().execute(() -> HunterWildcardConfigScreen.receiveOperationResult(payload)));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_CLOSE_CONFIG_SCREEN, (payload, context) ->
+                context.client().execute(HunterWildcardConfigScreen::closeFromServer));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_CLEAR_CHAT, (payload, context) ->
+                context.client().execute(() -> context.client().inGameHud.getChatHud().clear(false)));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WILDCARD_DRAW, (payload, context) ->
                 context.client().execute(() -> WildcardDrawOverlay.start(payload.wildcardName())));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WILDCARD_INTRO, (payload, context) ->
@@ -37,6 +41,17 @@ public class HunterWildcardClient implements ClientModInitializer {
                         payload.title(),
                         payload.line1(),
                         payload.line2(),
+                        payload.style()
+                )));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_OBJECTIVE_STATUS, (payload, context) ->
+                context.client().execute(() -> WildcardDrawOverlay.setObjectiveStatus(
+                        payload.visible(),
+                        payload.text(),
+                        payload.style()
+                )));
+        ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_OBJECTIVE_NOTICE, (payload, context) ->
+                context.client().execute(() -> WildcardDrawOverlay.showObjectiveNotice(
+                        payload.message(),
                         payload.style()
                 )));
         ClientPlayNetworking.registerGlobalReceiver(HunterWildcardPackets.S2C_WEAPON_OVERHEAT_STATUS, (payload, context) ->

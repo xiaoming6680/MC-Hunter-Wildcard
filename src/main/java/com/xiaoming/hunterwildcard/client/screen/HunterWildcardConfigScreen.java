@@ -25,6 +25,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -67,6 +68,7 @@ public class HunterWildcardConfigScreen extends Screen {
     private static ConfigSnapshot cachedEditableConfig;
 
     private final List<Label> labels = new ArrayList<>();
+    private final List<WrappedLabel> wrappedLabels = new ArrayList<>();
     private final List<Box> boxes = new ArrayList<>();
     private final List<Icon> icons = new ArrayList<>();
     private final Map<NumberField, TextFieldWidget> numberFields = new EnumMap<>(NumberField.class);
@@ -126,9 +128,17 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    public static void closeFromServer() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.currentScreen instanceof HunterWildcardConfigScreen) {
+            client.setScreen(null);
+        }
+    }
+
     @Override
     protected void init() {
         labels.clear();
+        wrappedLabels.clear();
         boxes.clear();
         icons.clear();
         numberFields.clear();
@@ -196,6 +206,9 @@ public class HunterWildcardConfigScreen extends Screen {
 
         for (Label label : labels) {
             context.drawText(textRenderer, Text.literal(trim(label.text, label.maxWidth(layout))), label.x, label.y, label.color, label.shadow);
+        }
+        for (WrappedLabel label : wrappedLabels) {
+            renderWrappedLabel(context, layout, label);
         }
         for (Icon icon : icons) {
             context.drawItem(icon.stack, icon.x, icon.y);
@@ -323,7 +336,7 @@ public class HunterWildcardConfigScreen extends Screen {
         }
 
         if (isConfigEditPage()) {
-            return hasUnsavedChanges() || hasVisibleInputChanges() || hasFocusedTextField() ? -1 : CONFIG_IDLE_REFRESH_TICKS;
+            return hasUnsavedChanges() || hasVisibleInputChanges() || hasFocusedTextField() || hasExpandedDropdown() ? -1 : CONFIG_IDLE_REFRESH_TICKS;
         }
 
         return CONFIG_IDLE_REFRESH_TICKS;
@@ -625,6 +638,13 @@ public class HunterWildcardConfigScreen extends Screen {
                 card.dropdown(DropdownField.TARGET_DIMENSION);
                 card.coordinates(NumberField.TARGET_X, NumberField.TARGET_Y, NumberField.TARGET_Z);
                 card.number(NumberField.TARGET_RADIUS);
+                card.buttonGrid(List.of(new ButtonSpec(
+                        "设定当前位置",
+                        widget -> setTargetToCurrentLocation(),
+                        ButtonVariant.NORMAL,
+                        canEditConfig() && editableConfig != null && client != null && client.player != null && client.world != null,
+                        "使用你当前所在维度和方块坐标作为逃亡者目标。"
+                )), 1, 132);
             }
             case COLLECT_ITEM -> {
                 card.string(StringField.TARGET_ITEM_ID);
@@ -786,17 +806,49 @@ public class HunterWildcardConfigScreen extends Screen {
         int targetGridWidth = columns * WILDCARD_TOGGLE_TARGET_WIDTH + (columns - 1) * gap;
         int cardWidth = Math.min(width, targetGridWidth + CARD_PADDING_X * 2);
         int cardX = x + Math.max(0, (width - cardWidth) / 2);
-        CardBuilder matrixCard = addCard(layout, cardX, y, cardWidth, "外卡开关矩阵");
+        CardBuilder matrixCard = addCard(layout, cardX, y, cardWidth, "外卡开关");
+        addWildcardBulkButtons(layout, matrixCard, cardX, y, cardWidth);
         matrixCard.toggleGrid(ToggleField.values(), columns);
         return matrixCard.finish() + CARD_GAP;
+    }
+
+    private void addWildcardBulkButtons(Layout layout, CardBuilder card, int cardX, int cardY, int cardWidth) {
+        List<ButtonSpec> buttons = List.of(
+                new ButtonSpec("开启所有外卡", widget -> setAllWildcards(true), ButtonVariant.NORMAL, canEditConfig(), "开启全部外卡开关。"),
+                new ButtonSpec("关闭所有外卡", widget -> setAllWildcards(false), ButtonVariant.DANGER, canEditConfig(), "关闭全部外卡开关。")
+        );
+        if (cardWidth >= 236) {
+            int buttonWidth = 82;
+            int buttonHeight = 18;
+            int totalWidth = buttonWidth * buttons.size() + BUTTON_GAP * (buttons.size() - 1);
+            int buttonX = cardX + cardWidth - CARD_PADDING_X - totalWidth;
+            int buttonY = cardY + CARD_PADDING_TOP - 3;
+            for (int i = 0; i < buttons.size(); i++) {
+                ButtonSpec button = buttons.get(i);
+                addContentButton(
+                        layout,
+                        buttonX + i * (buttonWidth + BUTTON_GAP),
+                        buttonY,
+                        buttonWidth,
+                        buttonHeight,
+                        button.title(),
+                        button.tooltip(),
+                        button.action(),
+                        button.variant(),
+                        button.enabled()
+                );
+            }
+            card.gap(8);
+            return;
+        }
+
+        card.buttonGrid(buttons, 2, 112);
     }
 
     private int addWildcardSettingsCard(Layout layout, int x, int y, int width, ToggleField field) {
         int cardWidth = Math.min(width, SMALL_CARD_MAX_WIDTH);
         int cardX = x + Math.max(0, (width - cardWidth) / 2);
         CardBuilder card = addCard(layout, cardX, y, cardWidth, field.label + "设置");
-        boolean enabled = getToggle(editableConfig, field);
-        card.info("外卡状态", enabled ? "开启" : "关闭", enabled ? 0xFF77E287 : 0xFFC9D4DE);
         switch (field) {
             case HUNTER_RADAR -> {
                 card.number(NumberField.HUNTER_RADAR_INTERVAL_SECONDS, canEditConfig());
@@ -806,9 +858,24 @@ public class HunterWildcardConfigScreen extends Screen {
                 card.number(NumberField.SUPPLY_DROP_INTERVAL_SECONDS, canEditConfig());
                 card.hint("补给空投会按该间隔落下带发光轨迹和信标光柱的好坏混合随机补给箱。");
             }
+            case BLOCK_DECAY -> {
+                card.number(NumberField.BLOCK_DECAY_SECONDS, canEditConfig());
+                card.hint("新放置且未被排除的方块会在该时间后消失。");
+            }
+            case PEARL_FRENZY -> {
+                card.number(NumberField.PEARL_FRENZY_MAX_PEARLS, canEditConfig());
+                card.number(NumberField.PEARL_FRENZY_INTERVAL_SECONDS, canEditConfig());
+                card.number(NumberField.WILDCARD_DURATION_SECONDS, canEditConfig());
+                card.hint("珍珠补给不会让背包中的末影珍珠超过上限。");
+            }
+            case WIND_CHARGE_BRAWL -> {
+                card.number(NumberField.WIND_CHARGE_BRAWL_INTERVAL_SECONDS, canEditConfig());
+                card.number(NumberField.WIND_CHARGE_EXPLOSION_MULTIPLIER_PERCENT, canEditConfig());
+                card.hint("倍率以百分比填写，180 表示 1.8 倍。");
+            }
             default -> card.hint("该外卡当前没有单独参数。");
         }
-        card.button("返回外卡矩阵", widget -> closeWildcardSettings(), ButtonVariant.NORMAL, true, 132);
+        card.button("返回外卡开关", widget -> closeWildcardSettings(), ButtonVariant.NORMAL, true, 132);
         return card.finish() + CARD_GAP;
     }
 
@@ -1028,16 +1095,35 @@ public class HunterWildcardConfigScreen extends Screen {
         int settingsWidth = configurable ? 42 : 0;
         int settingsGap = configurable ? 4 : 0;
         int buttonsWidth = toggleWidth + settingsWidth + settingsGap;
+        int infoButtonSize = 12;
+        int infoGap = 3;
         int iconSize = 16;
         int iconX = x + 7;
         int iconY = y + Math.max(4, (height - iconSize) / 2);
         int labelX = iconX + iconSize + 6;
-        int textWidth = Math.max(20, width - buttonsWidth - (labelX - x) - 8);
-        int labelY = y + Math.max(4, (height - textRenderer.fontHeight) / 2);
+        int rightButtonsX = x + width - buttonsWidth - 5;
+        int maxInfoX = rightButtonsX - infoButtonSize - 4;
+        int desiredTextWidth = Math.max(8, width - buttonsWidth - (labelX - x) - infoButtonSize - infoGap - 12);
+        int firstLineWidth = textRenderer.getWidth(wrapLabelText(field.label, desiredTextWidth, 2).get(0));
+        int infoX = Math.min(labelX + Math.min(firstLineWidth, desiredTextWidth) + infoGap, Math.max(labelX, maxInfoX));
+        int textWidth = Math.max(8, infoX - labelX - infoGap);
         if (isVisibleInContent(layout, y, height)) {
             icons.add(new Icon(WildcardIcons.iconFor(field.label), iconX, iconY));
-            labels.add(new Label(field.label, labelX, labelY, enabled ? 0xFFFFFFFF : 0xFFC9D4DE, false, textWidth));
+            wrappedLabels.add(new WrappedLabel(field.label, labelX, y, height, enabled ? 0xFFFFFFFF : 0xFFC9D4DE, false, textWidth, 2));
         }
+        addContentButton(
+                layout,
+                infoX,
+                y + Math.max(0, (height - infoButtonSize) / 2),
+                infoButtonSize,
+                infoButtonSize,
+                "i",
+                wildcardInfoTooltip(field),
+                widget -> {
+                },
+                ButtonVariant.NORMAL,
+                true
+        );
         if (configurable) {
             addContentButton(
                     layout,
@@ -1068,6 +1154,40 @@ public class HunterWildcardConfigScreen extends Screen {
 
     private String wildcardToggleTooltip(ToggleField field, boolean enabled) {
         return field.label + "：" + (enabled ? "已开启" : "已关闭") + "，点击切换。";
+    }
+
+    private String wildcardInfoTooltip(ToggleField field) {
+        ConfigSnapshot config = editableConfig;
+        return switch (field) {
+            case SPEED_RUSH -> "全体参与者获得速度 II，追逐和逃跑节奏都会变快；外卡结束后移除本效果。";
+            case FEATHERWEIGHT -> "全体参与者获得跳跃提升 II 和缓降，更容易跨越地形并减少坠落威胁。";
+            case GLOWING -> "全体参与者获得发光效果，隔墙也更容易被发现，潜行和躲藏会变难。";
+            case NIGHT_HUNT -> "强制世界保持夜晚，猎人获得夜视；逃亡者需要在夜间环境下行动。";
+            case EXPLOSIVE_DEATH -> "参与者死亡或击杀生物时，会在死亡/被击杀位置产生爆炸。";
+            case SUPPLY_DROP -> "每 " + configuredSeconds(config == null ? 60 : config.supplyDropIntervalSeconds()) + " 随机选一名参与者附近投放补给箱；未开启箱子会连同内部物品一起消失。";
+            case HUNTER_RADAR -> "每 " + configuredSeconds(config == null ? 20 : config.hunterRadarIntervalSeconds()) + " 向猎人播报同维度最近逃亡者距离；被探测者会收到预警。";
+            case COMPASS_CHAOS -> "猎人指南针目标会随机偏离真实逃亡者位置约 30-80 格，追踪方向不再完全可靠。";
+            case HUNGER_CHASE -> "参与者更易饥饿，低饥饿会短暂缓慢；进食获得速度，高级食物获得 10 秒速度 II。";
+            case WEAPON_OVERHEAT -> "短时间连续攻击会积累过热；热度越高越容易获得虚弱和缓慢，热度条显示当前状态。";
+            case LIGHT_LOAD -> "按护甲重量给予速度或缓慢：轻装更灵活，重甲更笨重。";
+            case BLOCK_DECAY -> "新放置且未被排除的普通方块会在 " + configuredSeconds(config == null ? 10 : config.blockDecaySeconds()) + " 后消失；容器、门、床、工作台等不会腐化。";
+            case PEARL_FRENZY -> "最多持有 " + configuredCount(config == null ? 4 : config.pearlFrenzyMaxPearls()) + " 个末影珍珠，每 " + configuredSeconds(config == null ? 45 : config.pearlFrenzyIntervalSeconds()) + " 补给 1 个；投掷珍珠可能触发副作用。";
+            case WIND_CHARGE_BRAWL -> "每 " + configuredSeconds(config == null ? 5 : config.windChargeBrawlIntervalSeconds()) + " 补给 1 个风弹，最多 16 个；风弹反弹/爆炸倍率为 " + configuredPercent(config == null ? 180 : config.windChargeExplosionMultiplierPercent()) + "。";
+            case BLOOD_RAGE -> "血量越低强化越高：90%速度 I，70%加力量 I，50%速度 II+抗性 I，30%力量/抗性 II，15%及以下再加夜视。";
+            case DISABLED_WILDCARD -> "本轮外卡没有额外效果，用于让随机池中出现空白回合。";
+        };
+    }
+
+    private String configuredSeconds(int seconds) {
+        return Math.max(1, seconds) + " 秒";
+    }
+
+    private String configuredCount(int count) {
+        return Integer.toString(Math.max(1, count));
+    }
+
+    private String configuredPercent(int percent) {
+        return Math.max(1, percent) + "%";
     }
 
     private boolean useTwoColumns(int usableContentWidth) {
@@ -1319,7 +1439,7 @@ public class HunterWildcardConfigScreen extends Screen {
                 width,
                 height,
                 "",
-                field.options,
+                dropdownOptions(field, getDropdownValue(editableConfig, field)),
                 getDropdownValue(editableConfig, field),
                 editable,
                 value -> selectDropdownField(field, value),
@@ -1328,6 +1448,22 @@ public class HunterWildcardConfigScreen extends Screen {
         dropdown.setOpenUp(openUp);
         dropdownFields.put(field, dropdown);
         addDrawableChild(dropdown);
+    }
+
+    private List<DropdownWidget.Option> dropdownOptions(DropdownField field, String currentValue) {
+        if (currentValue == null || currentValue.isBlank()) {
+            return field.options;
+        }
+
+        for (DropdownWidget.Option option : field.options) {
+            if (option.value().equals(currentValue)) {
+                return field.options;
+            }
+        }
+
+        List<DropdownWidget.Option> options = new ArrayList<>(field.options);
+        options.add(option(currentValue, currentValue));
+        return options;
     }
 
     private void addToggleField(ToggleField field, int x, int y, int width, int height) {
@@ -1375,6 +1511,33 @@ public class HunterWildcardConfigScreen extends Screen {
         if (isVisibleInContent(layout, y, textRenderer.fontHeight)) {
             labels.add(new Label(text, x, y, color, shadow));
         }
+    }
+
+    private void renderWrappedLabel(DrawContext context, Layout layout, WrappedLabel label) {
+        int maxWidth = label.maxWidth(layout);
+        List<String> lines = wrapLabelText(label.text(), maxWidth, label.maxLines());
+        int textHeight = lines.size() * textRenderer.fontHeight + Math.max(0, lines.size() - 1);
+        int startY = label.y() + Math.max(0, (label.height() - textHeight) / 2);
+        for (int i = 0; i < lines.size(); i++) {
+            context.drawText(textRenderer, Text.literal(lines.get(i)), label.x(), startY + i * (textRenderer.fontHeight + 1), label.color(), label.shadow());
+        }
+    }
+
+    private List<String> wrapLabelText(String text, int maxWidth, int maxLines) {
+        List<String> lines = new ArrayList<>();
+        String remaining = text == null ? "" : text.trim();
+        while (!remaining.isEmpty() && lines.size() < maxLines) {
+            String line = textRenderer.trimToWidth(remaining, maxWidth);
+            if (line.isBlank()) {
+                line = remaining.substring(0, 1);
+            }
+            remaining = remaining.substring(line.length()).trim();
+            if (!remaining.isEmpty() && lines.size() == maxLines - 1) {
+                line = textRenderer.trimToWidth(line + "...", maxWidth);
+            }
+            lines.add(line);
+        }
+        return lines.isEmpty() ? List.of("") : lines;
     }
 
     private void addContentNumberField(Layout layout, NumberField field, int x, int y, int width, int fieldHeight) {
@@ -1658,6 +1821,15 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    private boolean hasExpandedDropdown() {
+        for (DropdownWidget dropdown : dropdownFields.values()) {
+            if (dropdown.isExpanded()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void switchPage(Page page) {
         if (page == currentPage) {
             return;
@@ -1686,6 +1858,22 @@ public class HunterWildcardConfigScreen extends Screen {
         }
 
         editableConfig = setToggle(editableConfig, field, !getToggle(editableConfig, field));
+        clearAndInit();
+    }
+
+    private void setAllWildcards(boolean enabled) {
+        if (!canEditConfig() || editableConfig == null || !applyVisibleInputs(true)) {
+            if (!canEditConfig()) {
+                showError(configEditDeniedMessage());
+            }
+            return;
+        }
+
+        ConfigSnapshot updated = editableConfig;
+        for (ToggleField field : ToggleField.values()) {
+            updated = setToggle(updated, field, enabled);
+        }
+        editableConfig = updated;
         clearAndInit();
     }
 
@@ -1732,6 +1920,32 @@ public class HunterWildcardConfigScreen extends Screen {
         }
 
         editableConfig = setDropdownValue(editableConfig, field, value);
+        clearAndInit();
+    }
+
+    private void setTargetToCurrentLocation() {
+        if (!canEditConfig() || editableConfig == null || !applyVisibleInputs(true)) {
+            if (!canEditConfig()) {
+                showError(configEditDeniedMessage());
+            }
+            return;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null || client.world == null) {
+            showError("当前未连接到世界，无法读取当前位置。");
+            return;
+        }
+
+        BlockPos pos = client.player.getBlockPos();
+        ModConfig copy = editableConfig.toConfig();
+        copy.targetDimension = client.world.getRegistryKey().getValue().toString();
+        copy.targetX = pos.getX();
+        copy.targetY = pos.getY();
+        copy.targetZ = pos.getZ();
+        copy.validate();
+        editableConfig = ConfigSnapshot.from(copy);
+        showToast("已设定为当前位置，保存后生效。", StatusKind.INFO);
         clearAndInit();
     }
 
@@ -2047,6 +2261,11 @@ public class HunterWildcardConfigScreen extends Screen {
             case ACTION_BAR_INTERVAL_SECONDS -> config.actionBarIntervalSeconds();
             case HUNTER_RADAR_INTERVAL_SECONDS -> config.hunterRadarIntervalSeconds();
             case SUPPLY_DROP_INTERVAL_SECONDS -> config.supplyDropIntervalSeconds();
+            case BLOCK_DECAY_SECONDS -> config.blockDecaySeconds();
+            case PEARL_FRENZY_MAX_PEARLS -> config.pearlFrenzyMaxPearls();
+            case PEARL_FRENZY_INTERVAL_SECONDS -> config.pearlFrenzyIntervalSeconds();
+            case WIND_CHARGE_BRAWL_INTERVAL_SECONDS -> config.windChargeBrawlIntervalSeconds();
+            case WIND_CHARGE_EXPLOSION_MULTIPLIER_PERCENT -> config.windChargeExplosionMultiplierPercent();
             case HUNTER_PREPARE_BOUNDARY_RADIUS -> config.hunterPrepareBoundaryRadius();
             case HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE -> config.hunterPrepareBoundaryWarnDistance();
             case SURVIVE_TIME_SECONDS -> config.surviveTimeSeconds();
@@ -2074,6 +2293,11 @@ public class HunterWildcardConfigScreen extends Screen {
             case ACTION_BAR_INTERVAL_SECONDS -> copy.actionBarIntervalSeconds = value;
             case HUNTER_RADAR_INTERVAL_SECONDS -> copy.hunterRadarIntervalSeconds = value;
             case SUPPLY_DROP_INTERVAL_SECONDS -> copy.supplyDropIntervalSeconds = value;
+            case BLOCK_DECAY_SECONDS -> copy.blockDecaySeconds = value;
+            case PEARL_FRENZY_MAX_PEARLS -> copy.pearlFrenzyMaxPearls = value;
+            case PEARL_FRENZY_INTERVAL_SECONDS -> copy.pearlFrenzyIntervalSeconds = value;
+            case WIND_CHARGE_BRAWL_INTERVAL_SECONDS -> copy.windChargeBrawlIntervalSeconds = value;
+            case WIND_CHARGE_EXPLOSION_MULTIPLIER_PERCENT -> copy.windChargeExplosionMultiplierPercent = value;
             case HUNTER_PREPARE_BOUNDARY_RADIUS -> copy.hunterPrepareBoundaryRadius = value;
             case HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE -> copy.hunterPrepareBoundaryWarnDistance = value;
             case SURVIVE_TIME_SECONDS -> copy.surviveTimeSeconds = value;
@@ -2230,7 +2454,11 @@ public class HunterWildcardConfigScreen extends Screen {
     }
 
     private boolean hasWildcardSettings(ToggleField field) {
-        return field == ToggleField.HUNTER_RADAR || field == ToggleField.SUPPLY_DROP;
+        return field == ToggleField.HUNTER_RADAR
+                || field == ToggleField.SUPPLY_DROP
+                || field == ToggleField.BLOCK_DECAY
+                || field == ToggleField.PEARL_FRENZY
+                || field == ToggleField.WIND_CHARGE_BRAWL;
     }
 
     private int enabledWildcardCount(ConfigSnapshot config) {
@@ -2690,6 +2918,11 @@ public class HunterWildcardConfigScreen extends Screen {
         ACTION_BAR_INTERVAL_SECONDS("状态栏刷新", "秒", 1),
         HUNTER_RADAR_INTERVAL_SECONDS("雷达播报", "秒", 1),
         SUPPLY_DROP_INTERVAL_SECONDS("空投间隔", "秒", 1),
+        BLOCK_DECAY_SECONDS("方块消失时间", "秒", 1),
+        PEARL_FRENZY_MAX_PEARLS("珍珠上限", "个", 1),
+        PEARL_FRENZY_INTERVAL_SECONDS("珍珠补给间隔", "秒", 1),
+        WIND_CHARGE_BRAWL_INTERVAL_SECONDS("风弹补给间隔", "秒", 1),
+        WIND_CHARGE_EXPLOSION_MULTIPLIER_PERCENT("风弹反弹倍率", "%", 1),
         HUNTER_PREPARE_BOUNDARY_RADIUS("准备区域半径", "格", 1),
         HUNTER_PREPARE_BOUNDARY_WARN_DISTANCE("边界警告距离", "格", 0),
         SURVIVE_TIME_SECONDS("存活时间", "秒", 1),
@@ -2795,11 +3028,11 @@ public class HunterWildcardConfigScreen extends Screen {
         SUPPLY_DROP("补给空投", "落下随机补给箱。"),
         HUNTER_RADAR("猎人雷达", "猎人获得距离提示。"),
         COMPASS_CHAOS("指南针干扰", "猎人指南针偏移。"),
-        HUNGER_CHASE("饥饿追逐", "更易饥饿，进食加速。"),
+        HUNGER_CHASE("饥饿追逐", "更易饥饿，进食获得速度效果"),
         WEAPON_OVERHEAT("武器过热", "连打会过热。"),
         LIGHT_LOAD("轻装上阵", "轻甲加速，重甲减速。"),
         BLOCK_DECAY("方块腐化", "新放方块会消失。"),
-        PEARL_FRENZY("珍珠狂潮", "定期获得珍珠。"),
+        PEARL_FRENZY("珍珠狂潮", "定期获得珍珠，但别随便扔：）"),
         WIND_CHARGE_BRAWL("风弹乱斗", "定期获得风弹。"),
         BLOOD_RAGE("血怒时刻", "低血量获得强化。"),
         DISABLED_WILDCARD("暂时停用", "没有额外效果。");
@@ -2880,6 +3113,12 @@ public class HunterWildcardConfigScreen extends Screen {
         }
     }
 
+    private record WrappedLabel(String text, int x, int y, int height, int color, boolean shadow, int width, int maxLines) {
+        int maxWidth(Layout layout) {
+            return width > 0 ? width : Math.max(20, layout.panelX() + layout.panelWidth() - x - 12);
+        }
+    }
+
     private record Box(int x, int y, int width, int height, int color, int borderColor) {
     }
 
@@ -2926,7 +3165,11 @@ public class HunterWildcardConfigScreen extends Screen {
             }
 
             int titleX = x + Math.max(4, (width - textRenderer.getWidth(title)) / 2);
-            int titleY = y + Math.max(4, (height - textRenderer.fontHeight) / 2);
+            int titlePadding = height <= 18 ? 1 : 4;
+            int titleY = y + Math.max(titlePadding, (height - textRenderer.fontHeight) / 2);
+            if ("i".equals(title) && height <= 14) {
+                titleY = y + Math.max(0, (height - textRenderer.fontHeight + 1) / 2);
+            }
             context.drawText(textRenderer, net.minecraft.text.Text.literal(title), titleX, titleY, palette.titleColor, true);
         }
 

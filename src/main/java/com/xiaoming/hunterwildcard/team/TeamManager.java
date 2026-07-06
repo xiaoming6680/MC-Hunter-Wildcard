@@ -10,26 +10,26 @@ import java.util.Map;
 import java.util.UUID;
 
 public class TeamManager {
-    private final Map<UUID, PlayerRole> roles = new HashMap<>();
+    private final Map<UUID, PlayerRole> playerRolesById = new HashMap<>();
 
     public void join(ServerPlayerEntity player, PlayerRole role) {
-        roles.put(player.getUuid(), role);
+        playerRolesById.put(player.getUuid(), role);
     }
 
     public PlayerRole leave(ServerPlayerEntity player) {
-        return roles.remove(player.getUuid());
+        return playerRolesById.remove(player.getUuid());
     }
 
-    public void remove(UUID uuid) {
-        roles.remove(uuid);
+    public void remove(UUID playerId) {
+        playerRolesById.remove(playerId);
     }
 
     public void clear() {
-        roles.clear();
+        playerRolesById.clear();
     }
 
     public PlayerRole getRole(ServerPlayerEntity player) {
-        return roles.get(player.getUuid());
+        return playerRolesById.get(player.getUuid());
     }
 
     public boolean isHunter(ServerPlayerEntity player) {
@@ -42,8 +42,8 @@ public class TeamManager {
 
     public int count(PlayerRole role) {
         int count = 0;
-        for (PlayerRole playerRole : roles.values()) {
-            if (playerRole == role) {
+        for (PlayerRole assignedRole : playerRolesById.values()) {
+            if (assignedRole == role) {
                 count++;
             }
         }
@@ -59,28 +59,28 @@ public class TeamManager {
     }
 
     public List<ServerPlayerEntity> getParticipants(MinecraftServer server) {
-        List<ServerPlayerEntity> players = new ArrayList<>();
-        for (UUID uuid : roles.keySet()) {
-            ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+        List<ServerPlayerEntity> onlinePlayers = new ArrayList<>();
+        for (UUID playerId : playerRolesById.keySet()) {
+            ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
             if (player != null) {
-                players.add(player);
+                onlinePlayers.add(player);
             }
         }
-        return players;
+        return onlinePlayers;
     }
 
     private List<ServerPlayerEntity> getPlayers(MinecraftServer server, PlayerRole role) {
-        List<ServerPlayerEntity> players = new ArrayList<>();
-        for (Map.Entry<UUID, PlayerRole> entry : roles.entrySet()) {
+        List<ServerPlayerEntity> onlinePlayers = new ArrayList<>();
+        for (Map.Entry<UUID, PlayerRole> entry : playerRolesById.entrySet()) {
             if (entry.getValue() != role) {
                 continue;
             }
 
             ServerPlayerEntity player = server.getPlayerManager().getPlayer(entry.getKey());
             if (player != null) {
-                players.add(player);
+                onlinePlayers.add(player);
             }
         }
-        return players;
+        return onlinePlayers;
     }
 }

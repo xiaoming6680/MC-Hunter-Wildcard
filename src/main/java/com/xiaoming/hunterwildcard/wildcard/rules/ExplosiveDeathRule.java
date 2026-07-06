@@ -4,6 +4,7 @@ import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.wildcard.WildcardRule;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.minecraft.server.world.ServerWorld;
 import net.minecraft.world.World;
 
 public class ExplosiveDeathRule implements WildcardRule {
@@ -25,6 +26,8 @@ public class ExplosiveDeathRule implements WildcardRule {
     }
 
     private void explodeAt(LivingEntity entity) {
-        entity.getEntityWorld().createExplosion(entity, entity.getX(), entity.getY(), entity.getZ(), EXPLOSION_POWER, World.ExplosionSourceType.NONE);
+        if (entity.getEntityWorld() instanceof ServerWorld world) {
+            world.createExplosion(null, entity.getX(), entity.getY(), entity.getZ(), EXPLOSION_POWER, World.ExplosionSourceType.TNT);
+        }
     }
 }

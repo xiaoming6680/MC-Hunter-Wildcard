@@ -406,8 +406,18 @@ public class SupplyDropRule implements WildcardRule {
         world.spawnParticles(ParticleTypes.CLOUD, drop.chestPos.getX() + 0.5, drop.chestPos.getY() + 0.9, drop.chestPos.getZ() + 0.5, 28, 0.35, 0.3, 0.35, 0.03);
         world.spawnParticles(ParticleTypes.END_ROD, drop.chestPos.getX() + 0.5, drop.chestPos.getY() + 1.1, drop.chestPos.getZ() + 0.5, 16, 0.25, 0.4, 0.25, 0.02);
         world.playSound(null, drop.chestPos, SoundEvents.BLOCK_BEACON_DEACTIVATE, SoundCategory.BLOCKS, 0.8F, 0.9F);
+        if (world.getBlockEntity(drop.chestPos) instanceof ChestBlockEntity chest) {
+            clearChestContents(chest);
+        }
         world.removeBlock(drop.chestPos, false);
         restoreBeaconMarker(world, drop);
+    }
+
+    private static void clearChestContents(ChestBlockEntity chest) {
+        for (int slot = 0; slot < chest.size(); slot++) {
+            chest.setStack(slot, ItemStack.EMPTY);
+        }
+        chest.markDirty();
     }
 
     private static BeaconMarker createBeaconMarker(ServerWorld world, BlockPos chestPos) {

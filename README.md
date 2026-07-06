@@ -1,4 +1,4 @@
-# 猎影外卡 (Hunter Wildcard)
+# 猎人游戏-外卡/猎人外卡 (Hunter Wildcard)
 
 一个用于 Minecraft Manhunt / 猎人追逃玩法的 Fabric 模组。玩家分为猎人和逃亡者，在追猎过程中会周期性抽取外卡事件，让每一局都出现不同的节奏变化和临场策略。
 

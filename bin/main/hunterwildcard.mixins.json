@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.xiaoming.hunterwildcard.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "PlayerEntityDropInventoryMixin",
+    "ItemFinishUsingMixin",
+    "BlockItemPlaceMixin",
+    "WindChargeEntityMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -18,8 +18,9 @@ public class WindChargeEntityMixin {
             index = 6
     )
     private float hunterwildcard$boostWindChargeExplosion(float power) {
-        if (GameManager.getInstance().getWildcardManager().getActiveRule() instanceof WindChargeBrawlRule) {
-            return power * WindChargeBrawlRule.EXPLOSION_POWER_MULTIPLIER;
+        GameManager gameManager = GameManager.getInstance();
+        if (gameManager.getWildcardManager().getActiveRule() instanceof WindChargeBrawlRule windChargeBrawlRule) {
+            return power * windChargeBrawlRule.getExplosionPowerMultiplier(gameManager.getConfig());
         }
 
         return power;

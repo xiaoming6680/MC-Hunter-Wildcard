@@ -31,6 +31,11 @@ public class ModConfig {
     public int actionBarIntervalSeconds = 1;
     public int hunterRadarIntervalSeconds = 20;
     public int supplyDropIntervalSeconds = 60;
+    public int blockDecaySeconds = 10;
+    public int pearlFrenzyMaxPearls = 4;
+    public int pearlFrenzyIntervalSeconds = 45;
+    public int windChargeBrawlIntervalSeconds = 5;
+    public int windChargeExplosionMultiplierPercent = 180;
     public boolean hunterPrepareBoundaryEnabled = true;
     public int hunterPrepareBoundaryRadius = 20;
     public int hunterPrepareBoundaryWarnDistance = 3;
@@ -99,6 +104,22 @@ public class ModConfig {
             if (json == null || !json.has("hunterVictoryType")) {
                 config.hunterVictoryType = inferHunterVictoryType(config).name();
             }
+            ModConfig defaults = new ModConfig();
+            if (json == null || !json.has("blockDecaySeconds")) {
+                config.blockDecaySeconds = defaults.blockDecaySeconds;
+            }
+            if (json == null || !json.has("pearlFrenzyMaxPearls")) {
+                config.pearlFrenzyMaxPearls = defaults.pearlFrenzyMaxPearls;
+            }
+            if (json == null || !json.has("pearlFrenzyIntervalSeconds")) {
+                config.pearlFrenzyIntervalSeconds = defaults.pearlFrenzyIntervalSeconds;
+            }
+            if (json == null || !json.has("windChargeBrawlIntervalSeconds")) {
+                config.windChargeBrawlIntervalSeconds = defaults.windChargeBrawlIntervalSeconds;
+            }
+            if (json == null || !json.has("windChargeExplosionMultiplierPercent")) {
+                config.windChargeExplosionMultiplierPercent = defaults.windChargeExplosionMultiplierPercent;
+            }
             config.validate();
             config.save();
             return config;
@@ -135,6 +156,11 @@ public class ModConfig {
         actionBarIntervalSeconds = clampSeconds(actionBarIntervalSeconds);
         hunterRadarIntervalSeconds = clampSeconds(hunterRadarIntervalSeconds);
         supplyDropIntervalSeconds = clampSeconds(supplyDropIntervalSeconds);
+        blockDecaySeconds = clampSeconds(blockDecaySeconds);
+        pearlFrenzyMaxPearls = clampPositive(pearlFrenzyMaxPearls);
+        pearlFrenzyIntervalSeconds = clampSeconds(pearlFrenzyIntervalSeconds);
+        windChargeBrawlIntervalSeconds = clampSeconds(windChargeBrawlIntervalSeconds);
+        windChargeExplosionMultiplierPercent = clampPositive(windChargeExplosionMultiplierPercent);
         hunterPrepareBoundaryRadius = clampPositive(hunterPrepareBoundaryRadius);
         hunterPrepareBoundaryWarnDistance = Math.max(0, hunterPrepareBoundaryWarnDistance);
         runnerVictoryType = getRunnerVictoryType().name();
@@ -169,6 +195,11 @@ public class ModConfig {
         actionBarIntervalSeconds = other.actionBarIntervalSeconds;
         hunterRadarIntervalSeconds = other.hunterRadarIntervalSeconds;
         supplyDropIntervalSeconds = other.supplyDropIntervalSeconds;
+        blockDecaySeconds = other.blockDecaySeconds;
+        pearlFrenzyMaxPearls = other.pearlFrenzyMaxPearls;
+        pearlFrenzyIntervalSeconds = other.pearlFrenzyIntervalSeconds;
+        windChargeBrawlIntervalSeconds = other.windChargeBrawlIntervalSeconds;
+        windChargeExplosionMultiplierPercent = other.windChargeExplosionMultiplierPercent;
         hunterPrepareBoundaryEnabled = other.hunterPrepareBoundaryEnabled;
         hunterPrepareBoundaryRadius = other.hunterPrepareBoundaryRadius;
         hunterPrepareBoundaryWarnDistance = other.hunterPrepareBoundaryWarnDistance;
@@ -250,6 +281,22 @@ public class ModConfig {
 
     public int getSupplyDropIntervalTicks() {
         return secondsToTicks(supplyDropIntervalSeconds);
+    }
+
+    public int getBlockDecayTicks() {
+        return secondsToTicks(blockDecaySeconds);
+    }
+
+    public int getPearlFrenzyIntervalTicks() {
+        return secondsToTicks(pearlFrenzyIntervalSeconds);
+    }
+
+    public int getWindChargeBrawlIntervalTicks() {
+        return secondsToTicks(windChargeBrawlIntervalSeconds);
+    }
+
+    public float getWindChargeExplosionMultiplier() {
+        return Math.max(1, windChargeExplosionMultiplierPercent) / 100.0F;
     }
 
     public int getSurviveTimeTicks() {

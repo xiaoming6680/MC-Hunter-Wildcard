@@ -23,11 +23,11 @@ public interface WildcardRule {
             case "SupplyDropRule" -> "落下随机补给箱。";
             case "HunterRadarRule" -> "猎人获得距离提示。";
             case "CompassChaosRule" -> "猎人指南针偏移。";
-            case "HungerChaseRule" -> "更易饥饿，进食加速。";
+            case "HungerChaseRule" -> "更易饥饿，进食获得速度效果";
             case "WeaponOverheatRule" -> "连打会过热。";
             case "LightLoadRule" -> "轻甲加速，重甲减速。";
             case "BlockDecayRule" -> "新放方块会消失。";
-            case "PearlFrenzyRule" -> "定期获得珍珠。";
+            case "PearlFrenzyRule" -> "定期获得珍珠，但别随便扔：）";
             case "WindChargeBrawlRule" -> "定期获得风弹。";
             case "BloodRageRule" -> "低血量获得强化。";
             case "DisabledWildcardRule" -> "没有额外效果。";

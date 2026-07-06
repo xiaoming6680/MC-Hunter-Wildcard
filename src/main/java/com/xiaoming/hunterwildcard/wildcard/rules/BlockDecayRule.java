@@ -10,7 +10,6 @@ import net.minecraft.block.Blocks;
 import net.minecraft.block.ChestBlock;
 import net.minecraft.block.CraftingTableBlock;
 import net.minecraft.block.DoorBlock;
-import net.minecraft.block.StainedGlassBlock;
 import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -23,9 +22,6 @@ import java.util.Iterator;
 import java.util.List;
 
 public class BlockDecayRule implements WildcardRule {
-    private static final int NORMAL_DECAY_TICKS = 200;
-    private static final int LIGHT_DECAY_TICKS = 100;
-
     private final List<DecayEntry> entries = new ArrayList<>();
     private int ticks;
 
@@ -64,8 +60,7 @@ public class BlockDecayRule implements WildcardRule {
             return;
         }
 
-        int delay = isLightweight(state) ? LIGHT_DECAY_TICKS : NORMAL_DECAY_TICKS;
-        entries.add(new DecayEntry(world.getRegistryKey(), pos.toImmutable(), state, ticks + delay));
+        entries.add(new DecayEntry(world.getRegistryKey(), pos.toImmutable(), state, ticks + context.getConfig().getBlockDecayTicks()));
     }
 
     @Override
@@ -88,17 +83,6 @@ public class BlockDecayRule implements WildcardRule {
                 || block instanceof BedBlock
                 || block instanceof AbstractFurnaceBlock
                 || block instanceof CraftingTableBlock;
-    }
-
-    private boolean isLightweight(BlockState state) {
-        Block block = state.getBlock();
-        String key = block.getTranslationKey();
-        return state.isOf(Blocks.GLASS)
-                || state.isOf(Blocks.GLASS_PANE)
-                || state.isOf(Blocks.TINTED_GLASS)
-                || block instanceof StainedGlassBlock
-                || key.contains("wool")
-                || key.contains("glass");
     }
 
     private record DecayEntry(RegistryKey<World> worldKey, BlockPos pos, BlockState state, int expireTick) {

@@ -146,6 +146,7 @@ public class GameManager {
         hunterBoundaryManager.start(context());
         bossBarManager.updatePrepareBar(context(), preparingTicks, config.getPreparingTicks());
 
+        HunterWildcardPackets.clearChat(server);
         messageManager.broadcast(server, "游戏开始准备，" + config.preparingSeconds + " 秒后进入追杀阶段。");
         source.sendFeedback(() -> Text.literal("猎人外卡已进入 PREPARING。"), true);
     }
@@ -384,12 +385,13 @@ public class GameManager {
     private void startRunning() {
         state = GameState.RUNNING;
         actionBarTicks = 0;
+        GameContext context = context();
         hunterBoundaryManager.clear();
         bossBarManager.clearPrepareBar();
-        respawnManager.start(context());
-        winConditionManager.start();
+        respawnManager.start(context);
+        winConditionManager.start(context);
         wildcardManager.reset();
-        compassTracker.giveCompasses(context());
+        compassTracker.giveCompasses(context);
         messageManager.broadcast(server, "RUNNING 阶段开始，猎人开始追踪逃亡者。");
     }
 
@@ -619,6 +621,7 @@ public class GameManager {
         endingTicks = config.getEndingTicks();
         GameContext endingContext = context();
         WinningSide winningSide = classifyWinner(reason);
+        HunterWildcardPackets.clearChat(server);
         sendEndingFeedback(reason, winningSide);
         sendEndingSummary(endingContext, reason, winningSide);
         launchWinnerFireworks(endingContext, winningSide);
@@ -790,7 +793,7 @@ public class GameManager {
         wildcardManager.clear(context);
         bossBarManager.clear();
         hunterBoundaryManager.clear();
-        winConditionManager.clear();
+        winConditionManager.clear(context);
         respawnManager.clear(context);
         compassTracker.clear(context);
 

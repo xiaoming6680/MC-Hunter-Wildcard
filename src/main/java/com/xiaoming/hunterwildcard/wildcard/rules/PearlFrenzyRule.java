@@ -13,8 +13,6 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Hand;
 
 public class PearlFrenzyRule implements WildcardRule {
-    private static final int REFILL_INTERVAL_TICKS = 900;
-    private static final int MAX_PEARLS = 4;
     private static final int SIDE_EFFECT_TICKS = 600;
     private int ticks;
 
@@ -27,19 +25,19 @@ public class PearlFrenzyRule implements WildcardRule {
     public void onStart(GameContext context) {
         ticks = 0;
         for (ServerPlayerEntity player : context.getParticipants()) {
-            giveUpTo(player, Items.ENDER_PEARL, 2, MAX_PEARLS);
+            giveUpTo(player, Items.ENDER_PEARL, 2, context.getConfig().pearlFrenzyMaxPearls);
         }
     }
 
     @Override
     public void onTick(GameContext context, int remainingTicks) {
         ticks++;
-        if (remainingTicks <= 0 || ticks % REFILL_INTERVAL_TICKS != 0) {
+        if (remainingTicks <= 0 || ticks % context.getConfig().getPearlFrenzyIntervalTicks() != 0) {
             return;
         }
 
         for (ServerPlayerEntity player : context.getParticipants()) {
-            giveUpTo(player, Items.ENDER_PEARL, 1, MAX_PEARLS);
+            giveUpTo(player, Items.ENDER_PEARL, 1, context.getConfig().pearlFrenzyMaxPearls);
         }
     }
 

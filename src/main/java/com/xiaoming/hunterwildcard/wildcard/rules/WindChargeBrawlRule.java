@@ -1,5 +1,6 @@
 package com.xiaoming.hunterwildcard.wildcard.rules;
 
+import com.xiaoming.hunterwildcard.config.ModConfig;
 import com.xiaoming.hunterwildcard.game.GameContext;
 import com.xiaoming.hunterwildcard.wildcard.WildcardRule;
 import net.minecraft.item.Item;
@@ -8,9 +9,7 @@ import net.minecraft.item.Items;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 public class WindChargeBrawlRule implements WildcardRule {
-    private static final int REFILL_INTERVAL_TICKS = 100;
     private static final int MAX_CHARGES = 16;
-    public static final float EXPLOSION_POWER_MULTIPLIER = 1.8F;
     private int ticks;
 
     @Override
@@ -29,13 +28,17 @@ public class WindChargeBrawlRule implements WildcardRule {
     @Override
     public void onTick(GameContext context, int remainingTicks) {
         ticks++;
-        if (remainingTicks <= 0 || ticks % REFILL_INTERVAL_TICKS != 0) {
+        if (remainingTicks <= 0 || ticks % context.getConfig().getWindChargeBrawlIntervalTicks() != 0) {
             return;
         }
 
         for (ServerPlayerEntity player : context.getParticipants()) {
             giveUpTo(player, Items.WIND_CHARGE, 1, MAX_CHARGES);
         }
+    }
+
+    public float getExplosionPowerMultiplier(ModConfig config) {
+        return config.getWindChargeExplosionMultiplier();
     }
 
     private void giveUpTo(ServerPlayerEntity player, Item item, int amount, int maxHeld) {

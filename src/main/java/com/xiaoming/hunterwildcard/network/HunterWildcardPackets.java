@@ -24,6 +24,10 @@ public class HunterWildcardPackets {
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "sync_config"));
     public static final CustomPayload.Id<OperationResultPayload> S2C_OPERATION_RESULT =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "operation_result"));
+    public static final CustomPayload.Id<CloseConfigScreenPayload> S2C_CLOSE_CONFIG_SCREEN =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "close_config_screen"));
+    public static final CustomPayload.Id<ClearChatPayload> S2C_CLEAR_CHAT =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "clear_chat"));
     public static final CustomPayload.Id<WildcardDrawPayload> S2C_WILDCARD_DRAW =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "wildcard_draw"));
     public static final CustomPayload.Id<WildcardIntroPayload> S2C_WILDCARD_INTRO =
@@ -32,6 +36,10 @@ public class HunterWildcardPackets {
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hunter_kill_feedback"));
     public static final CustomPayload.Id<HudFeedbackPayload> S2C_HUD_FEEDBACK =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "hud_feedback"));
+    public static final CustomPayload.Id<ObjectiveStatusPayload> S2C_OBJECTIVE_STATUS =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "objective_status"));
+    public static final CustomPayload.Id<ObjectiveNoticePayload> S2C_OBJECTIVE_NOTICE =
+            new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "objective_notice"));
     public static final CustomPayload.Id<WeaponOverheatStatusPayload> S2C_WEAPON_OVERHEAT_STATUS =
             new CustomPayload.Id<>(Identifier.of(HunterWildcardMod.MOD_ID, "weapon_overheat_status"));
     public static final CustomPayload.Id<UpdateConfigPayload> C2S_UPDATE_CONFIG =
@@ -62,10 +70,14 @@ public class HunterWildcardPackets {
         PayloadTypeRegistry.playC2S().register(C2S_REQUEST_CONFIG, RequestConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_SYNC_CONFIG, SyncConfigPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_OPERATION_RESULT, OperationResultPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_CLOSE_CONFIG_SCREEN, CloseConfigScreenPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_CLEAR_CHAT, ClearChatPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_WILDCARD_DRAW, WildcardDrawPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_WILDCARD_INTRO, WildcardIntroPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_HUNTER_KILL_FEEDBACK, HunterKillFeedbackPayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_HUD_FEEDBACK, HudFeedbackPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_OBJECTIVE_STATUS, ObjectiveStatusPayload.CODEC);
+        PayloadTypeRegistry.playS2C().register(S2C_OBJECTIVE_NOTICE, ObjectiveNoticePayload.CODEC);
         PayloadTypeRegistry.playS2C().register(S2C_WEAPON_OVERHEAT_STATUS, WeaponOverheatStatusPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_UPDATE_CONFIG, UpdateConfigPayload.CODEC);
         PayloadTypeRegistry.playC2S().register(C2S_RELOAD_CONFIG, ReloadConfigPayload.CODEC);
@@ -99,6 +111,32 @@ public class HunterWildcardPackets {
     public static void syncAll(MinecraftServer server) {
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             sendSync(player);
+        }
+    }
+
+    public static void closeConfigScreens(MinecraftServer server) {
+        if (server == null) {
+            return;
+        }
+
+        CloseConfigScreenPayload payload = new CloseConfigScreenPayload();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_CLOSE_CONFIG_SCREEN)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    public static void clearChat(MinecraftServer server) {
+        if (server == null) {
+            return;
+        }
+
+        ClearChatPayload payload = new ClearChatPayload();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_CLEAR_CHAT)) {
+                ServerPlayNetworking.send(player, payload);
+            }
         }
     }
 
@@ -165,6 +203,40 @@ public class HunterWildcardPackets {
         HudFeedbackPayload payload = new HudFeedbackPayload(title, line1, line2, style);
         for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
             if (ServerPlayNetworking.canSend(player, S2C_HUD_FEEDBACK)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    public static void sendObjectiveStatus(GameContext context, boolean visible, String text, String style) {
+        sendObjectiveStatus(context.getServer(), visible, text, style);
+    }
+
+    public static void sendObjectiveStatus(MinecraftServer server, boolean visible, String text, String style) {
+        if (server == null) {
+            return;
+        }
+
+        ObjectiveStatusPayload payload = new ObjectiveStatusPayload(visible, text, style);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_OBJECTIVE_STATUS)) {
+                ServerPlayNetworking.send(player, payload);
+            }
+        }
+    }
+
+    public static void sendObjectiveNotice(GameContext context, String message, String style) {
+        sendObjectiveNotice(context.getServer(), message, style);
+    }
+
+    public static void sendObjectiveNotice(MinecraftServer server, String message, String style) {
+        if (server == null) {
+            return;
+        }
+
+        ObjectiveNoticePayload payload = new ObjectiveNoticePayload(message, style);
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (ServerPlayNetworking.canSend(player, S2C_OBJECTIVE_NOTICE)) {
                 ServerPlayNetworking.send(player, payload);
             }
         }
@@ -270,6 +342,7 @@ public class HunterWildcardPackets {
                     return;
                 }
                 manager.start(player.getCommandSource());
+                closeConfigScreens(player.getEntityWorld().getServer());
                 syncAllAndResult(player, true, "游戏已开始准备。");
             }
             case STOP_GAME -> {
@@ -351,6 +424,7 @@ public class HunterWildcardPackets {
                     return;
                 }
                 manager.start(player.getCommandSource());
+                closeConfigScreens(player.getEntityWorld().getServer());
                 syncAllAndResult(player, true, "游戏已开始准备。");
             }
             case STOP_GAME -> {
@@ -430,6 +504,11 @@ public class HunterWildcardPackets {
             int actionBarIntervalSeconds,
             int hunterRadarIntervalSeconds,
             int supplyDropIntervalSeconds,
+            int blockDecaySeconds,
+            int pearlFrenzyMaxPearls,
+            int pearlFrenzyIntervalSeconds,
+            int windChargeBrawlIntervalSeconds,
+            int windChargeExplosionMultiplierPercent,
             boolean hunterPrepareBoundaryEnabled,
             int hunterPrepareBoundaryRadius,
             int hunterPrepareBoundaryWarnDistance,
@@ -477,6 +556,11 @@ public class HunterWildcardPackets {
     ) {
         private static ConfigSnapshot fromBuf(RegistryByteBuf buf) {
             return new ConfigSnapshot(
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
+                    buf.readInt(),
                     buf.readInt(),
                     buf.readInt(),
                     buf.readInt(),
@@ -543,6 +627,11 @@ public class HunterWildcardPackets {
             buf.writeInt(actionBarIntervalSeconds);
             buf.writeInt(hunterRadarIntervalSeconds);
             buf.writeInt(supplyDropIntervalSeconds);
+            buf.writeInt(blockDecaySeconds);
+            buf.writeInt(pearlFrenzyMaxPearls);
+            buf.writeInt(pearlFrenzyIntervalSeconds);
+            buf.writeInt(windChargeBrawlIntervalSeconds);
+            buf.writeInt(windChargeExplosionMultiplierPercent);
             buf.writeBoolean(hunterPrepareBoundaryEnabled);
             buf.writeInt(hunterPrepareBoundaryRadius);
             buf.writeInt(hunterPrepareBoundaryWarnDistance);
@@ -600,6 +689,11 @@ public class HunterWildcardPackets {
                     config.actionBarIntervalSeconds,
                     config.hunterRadarIntervalSeconds,
                     config.supplyDropIntervalSeconds,
+                    config.blockDecaySeconds,
+                    config.pearlFrenzyMaxPearls,
+                    config.pearlFrenzyIntervalSeconds,
+                    config.windChargeBrawlIntervalSeconds,
+                    config.windChargeExplosionMultiplierPercent,
                     config.hunterPrepareBoundaryEnabled,
                     config.hunterPrepareBoundaryRadius,
                     config.hunterPrepareBoundaryWarnDistance,
@@ -658,6 +752,11 @@ public class HunterWildcardPackets {
             config.actionBarIntervalSeconds = actionBarIntervalSeconds;
             config.hunterRadarIntervalSeconds = hunterRadarIntervalSeconds;
             config.supplyDropIntervalSeconds = supplyDropIntervalSeconds;
+            config.blockDecaySeconds = blockDecaySeconds;
+            config.pearlFrenzyMaxPearls = pearlFrenzyMaxPearls;
+            config.pearlFrenzyIntervalSeconds = pearlFrenzyIntervalSeconds;
+            config.windChargeBrawlIntervalSeconds = windChargeBrawlIntervalSeconds;
+            config.windChargeExplosionMultiplierPercent = windChargeExplosionMultiplierPercent;
             config.hunterPrepareBoundaryEnabled = hunterPrepareBoundaryEnabled;
             config.hunterPrepareBoundaryRadius = hunterPrepareBoundaryRadius;
             config.hunterPrepareBoundaryWarnDistance = hunterPrepareBoundaryWarnDistance;
@@ -801,6 +900,40 @@ public class HunterWildcardPackets {
         }
     }
 
+    public record CloseConfigScreenPayload() implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, CloseConfigScreenPayload> CODEC =
+                PacketCodec.of(CloseConfigScreenPayload::write, CloseConfigScreenPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+        }
+
+        private static CloseConfigScreenPayload read(RegistryByteBuf buf) {
+            return new CloseConfigScreenPayload();
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_CLOSE_CONFIG_SCREEN;
+        }
+    }
+
+    public record ClearChatPayload() implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, ClearChatPayload> CODEC =
+                PacketCodec.of(ClearChatPayload::write, ClearChatPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+        }
+
+        private static ClearChatPayload read(RegistryByteBuf buf) {
+            return new ClearChatPayload();
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_CLEAR_CHAT;
+        }
+    }
+
     public record WildcardDrawPayload(String wildcardName) implements CustomPayload {
         public static final PacketCodec<RegistryByteBuf, WildcardDrawPayload> CODEC =
                 PacketCodec.of(WildcardDrawPayload::write, WildcardDrawPayload::read);
@@ -894,6 +1027,52 @@ public class HunterWildcardPackets {
         @Override
         public Id<? extends CustomPayload> getId() {
             return S2C_HUD_FEEDBACK;
+        }
+    }
+
+    public record ObjectiveStatusPayload(boolean visible, String text, String style) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, ObjectiveStatusPayload> CODEC =
+                PacketCodec.of(ObjectiveStatusPayload::write, ObjectiveStatusPayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeBoolean(visible);
+            buf.writeString(text == null ? "" : text);
+            buf.writeString(style == null ? "" : style);
+        }
+
+        private static ObjectiveStatusPayload read(RegistryByteBuf buf) {
+            return new ObjectiveStatusPayload(
+                    buf.readBoolean(),
+                    buf.readString(192),
+                    buf.readString(32)
+            );
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_OBJECTIVE_STATUS;
+        }
+    }
+
+    public record ObjectiveNoticePayload(String message, String style) implements CustomPayload {
+        public static final PacketCodec<RegistryByteBuf, ObjectiveNoticePayload> CODEC =
+                PacketCodec.of(ObjectiveNoticePayload::write, ObjectiveNoticePayload::read);
+
+        private void write(RegistryByteBuf buf) {
+            buf.writeString(message == null ? "" : message);
+            buf.writeString(style == null ? "" : style);
+        }
+
+        private static ObjectiveNoticePayload read(RegistryByteBuf buf) {
+            return new ObjectiveNoticePayload(
+                    buf.readString(192),
+                    buf.readString(32)
+            );
+        }
+
+        @Override
+        public Id<? extends CustomPayload> getId() {
+            return S2C_OBJECTIVE_NOTICE;
         }
     }
 

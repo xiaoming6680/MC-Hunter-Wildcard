@@ -28,6 +28,12 @@ public class WildcardDrawOverlay {
     private static final long FEEDBACK_OUT_MS = 420L;
     private static final long FEEDBACK_TOTAL_MS = FEEDBACK_IN_MS + FEEDBACK_HOLD_MS + FEEDBACK_OUT_MS;
     private static final long INTRO_SLIDE_MS = 260L;
+    private static final long OBJECTIVE_SLIDE_MS = 260L;
+    private static final long OBJECTIVE_NOTICE_IN_MS = 260L;
+    private static final long OBJECTIVE_NOTICE_HOLD_MS = 2300L;
+    private static final long OBJECTIVE_NOTICE_OUT_MS = 420L;
+    private static final long OBJECTIVE_NOTICE_TOTAL_MS = OBJECTIVE_NOTICE_IN_MS + OBJECTIVE_NOTICE_HOLD_MS + OBJECTIVE_NOTICE_OUT_MS;
+    private static final float OBJECTIVE_PANEL_SCALE = 0.8F;
     private static final String[] SPIN_NAMES = {
             "疾速追猎",
             "轻盈之身",
@@ -59,6 +65,12 @@ public class WildcardDrawOverlay {
     private static int weaponOverheatHeat;
     private static int weaponOverheatMaxHeat = 1;
     private static final List<FeedbackEntry> feedbackEntries = new ArrayList<>();
+    private static boolean objectiveVisible;
+    private static boolean objectiveHiding;
+    private static long objectiveTransitionStartTimeMs = -1L;
+    private static String objectiveText = "";
+    private static String objectiveStyle = "runner";
+    private static final List<ObjectiveNoticeEntry> objectiveNoticeEntries = new ArrayList<>();
 
     private WildcardDrawOverlay() {
     }
@@ -101,6 +113,41 @@ public class WildcardDrawOverlay {
         MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.BLOCK_NOTE_BLOCK_PLING, 1.15F));
     }
 
+    public static void setObjectiveStatus(boolean visible, String text, String style) {
+        long now = System.currentTimeMillis();
+        if (visible) {
+            boolean wasFullyVisible = objectiveVisible && !objectiveHiding;
+            objectiveVisible = true;
+            objectiveHiding = false;
+            if (!wasFullyVisible) {
+                objectiveTransitionStartTimeMs = now;
+            }
+            objectiveText = text == null ? "" : text;
+            objectiveStyle = style == null || style.isBlank() ? "runner" : style;
+            return;
+        }
+
+        if (objectiveVisible && !objectiveHiding) {
+            objectiveHiding = true;
+            objectiveTransitionStartTimeMs = now;
+        }
+    }
+
+    public static void showObjectiveNotice(String message, String style) {
+        String safeMessage = message == null ? "" : message;
+        if (safeMessage.isBlank()) {
+            return;
+        }
+
+        objectiveNoticeEntries.add(new ObjectiveNoticeEntry(
+                safeMessage,
+                style == null || style.isBlank() ? "coordinate" : style,
+                System.currentTimeMillis()
+        ));
+
+        MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.ui(SoundEvents.BLOCK_NOTE_BLOCK_PLING, 1.05F));
+    }
+
     public static void setIntro(boolean visible, String wildcardName, String description) {
         if (visible) {
             introVisible = true;
@@ -126,7 +173,9 @@ public class WildcardDrawOverlay {
     private static void render(DrawContext context, RenderTickCounter tickCounter) {
         renderDrawPanel(context);
         renderIntroPanel(context);
+        renderObjectiveStatusPanel(context);
         renderWeaponOverheatBar(context);
+        renderObjectiveNoticePanels(context);
         renderFeedbackPanels(context);
     }
 
@@ -168,12 +217,12 @@ public class WildcardDrawOverlay {
         int screenWidth = client.getWindow().getScaledWidth();
         String title = "外卡：" + introName;
         int maxAvailableWidth = Math.max(80, screenWidth - 6);
-        int compactWidth = Math.min(Math.min(184, maxAvailableWidth), Math.max(124, screenWidth / 2));
-        int wideWidth = Math.max(compactWidth, Math.min(260, maxAvailableWidth));
+        int compactWidth = Math.min(Math.min(164, maxAvailableWidth), Math.max(112, screenWidth / 2));
+        int wideWidth = Math.max(compactWidth, Math.min(224, maxAvailableWidth));
         boolean needsWide = textRenderer.getWidth(title) > compactWidth - 12
                 || (!introDescription.isBlank() && textRenderer.getWidth(introDescription) > compactWidth - 12);
         int panelWidth = needsWide ? wideWidth : compactWidth;
-        int maxDescriptionLines = needsWide ? 4 : 2;
+        int maxDescriptionLines = needsWide ? 5 : 3;
         List<String> descriptionLines = introDescription.isBlank()
                 ? List.of()
                 : wrap(textRenderer, introDescription, panelWidth - 12, maxDescriptionLines);
@@ -204,6 +253,155 @@ public class WildcardDrawOverlay {
         for (int i = 0; i < descriptionLines.size(); i++) {
             context.drawText(textRenderer, Text.literal(descriptionLines.get(i)), panelX + 5, panelY + 16 + i * 11, withAlpha(0xFFC9D4DE, alpha), false);
         }
+    }
+
+    private static void renderObjectiveStatusPanel(DrawContext context) {
+        if (!objectiveVisible) {
+            return;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.options.hudHidden) {
+            return;
+        }
+
+        TextRenderer textRenderer = client.textRenderer;
+        int screenWidth = client.getWindow().getScaledWidth();
+        int screenHeight = client.getWindow().getScaledHeight();
+        int maxAvailableWidth = Math.max(96, screenWidth - 8);
+        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(objectiveText) + 42));
+        int panelHeight = 36;
+        int visualPanelWidth = scaledObjectiveSize(panelWidth);
+        int visualPanelHeight = scaledObjectiveSize(panelHeight);
+        long elapsed = objectiveTransitionStartTimeMs < 0L ? OBJECTIVE_SLIDE_MS : System.currentTimeMillis() - objectiveTransitionStartTimeMs;
+        if (objectiveHiding && elapsed >= OBJECTIVE_SLIDE_MS) {
+            objectiveVisible = false;
+            objectiveHiding = false;
+            objectiveTransitionStartTimeMs = -1L;
+            objectiveText = "";
+            return;
+        }
+
+        float progress = smooth(Math.min(1.0F, elapsed / (float) OBJECTIVE_SLIDE_MS));
+        if (objectiveHiding) {
+            progress = 1.0F - progress;
+        }
+        float alpha = Math.max(0.0F, Math.min(1.0F, progress));
+        int panelX = -Math.round((visualPanelWidth + 2) * (1.0F - progress));
+        int panelY = objectiveBaseY(screenHeight, visualPanelHeight);
+        int accent = objectiveAccent(objectiveStyle);
+
+        renderScaledObjectiveStatusPanel(context, textRenderer, panelX, panelY, panelWidth, panelHeight, accent, alpha);
+    }
+
+    private static void renderObjectiveNoticePanels(DrawContext context) {
+        if (objectiveNoticeEntries.isEmpty()) {
+            return;
+        }
+
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.options.hudHidden) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        Iterator<ObjectiveNoticeEntry> iterator = objectiveNoticeEntries.iterator();
+        while (iterator.hasNext()) {
+            ObjectiveNoticeEntry entry = iterator.next();
+            if (entry.topStartTimeMs >= 0L && now - entry.topStartTimeMs >= OBJECTIVE_NOTICE_TOTAL_MS) {
+                iterator.remove();
+            }
+        }
+
+        if (objectiveNoticeEntries.isEmpty()) {
+            return;
+        }
+
+        ObjectiveNoticeEntry first = objectiveNoticeEntries.get(0);
+        if (first.topStartTimeMs < 0L) {
+            first.topStartTimeMs = now;
+        }
+
+        for (int i = 0; i < objectiveNoticeEntries.size(); i++) {
+            renderObjectiveNoticeEntry(context, objectiveNoticeEntries.get(i), i, now);
+        }
+    }
+
+    private static void renderObjectiveNoticeEntry(DrawContext context, ObjectiveNoticeEntry entry, int index, long now) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        TextRenderer textRenderer = client.textRenderer;
+        int screenWidth = client.getWindow().getScaledWidth();
+        int screenHeight = client.getWindow().getScaledHeight();
+        int maxAvailableWidth = Math.max(96, screenWidth - 8);
+        int panelWidth = Math.min(Math.min(204, maxAvailableWidth), Math.max(156, textRenderer.getWidth(entry.message) + 42));
+        int panelHeight = 38;
+        int visualPanelWidth = scaledObjectiveSize(panelWidth);
+        int visualPanelHeight = scaledObjectiveSize(panelHeight);
+        int baseY = objectiveBaseY(screenHeight, visualPanelHeight);
+        if (objectiveVisible) {
+            baseY += scaledObjectiveSize(36) + 5;
+        }
+        int targetY = baseY + index * (visualPanelHeight + 5);
+        if (Float.isNaN(entry.currentY)) {
+            entry.currentY = targetY;
+        } else {
+            entry.currentY += (targetY - entry.currentY) * 0.35F;
+        }
+        int panelY = Math.round(entry.currentY);
+        int panelX = objectiveNoticePanelX(visualPanelWidth, entry, now);
+        int accent = objectiveAccent(entry.style);
+
+        renderScaledObjectiveNoticePanel(context, textRenderer, entry, panelX, panelY, panelWidth, panelHeight, accent);
+    }
+
+    private static void renderScaledObjectiveStatusPanel(DrawContext context, TextRenderer textRenderer, int panelX, int panelY, int panelWidth, int panelHeight, int accent, float alpha) {
+        var matrices = context.getMatrices();
+        matrices.pushMatrix();
+        matrices.translate(panelX, panelY);
+        matrices.scale(OBJECTIVE_PANEL_SCALE, OBJECTIVE_PANEL_SCALE);
+        context.fill(0, 0, panelWidth, panelHeight, withAlpha(0xB8161B22, alpha));
+        context.fill(0, 0, 3, panelHeight, withAlpha(accent, alpha));
+        context.fill(0, 0, panelWidth, 1, withAlpha(accent, alpha));
+        context.fill(0, panelHeight - 1, panelWidth, panelHeight, withAlpha(accent, alpha));
+
+        context.drawItem(objectiveIcon(objectiveStyle), 8, 10);
+        context.drawText(textRenderer, Text.literal("逃亡目标"), 30, 5, withAlpha(accent, alpha), false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, objectiveText, panelWidth - 38)), 30, 20, withAlpha(0xFFFFFFFF, alpha), true);
+        matrices.popMatrix();
+    }
+
+    private static void renderScaledObjectiveNoticePanel(DrawContext context, TextRenderer textRenderer, ObjectiveNoticeEntry entry, int panelX, int panelY, int panelWidth, int panelHeight, int accent) {
+        var matrices = context.getMatrices();
+        matrices.pushMatrix();
+        matrices.translate(panelX, panelY);
+        matrices.scale(OBJECTIVE_PANEL_SCALE, OBJECTIVE_PANEL_SCALE);
+        context.fill(0, 0, panelWidth, panelHeight, 0xB8161B22);
+        context.fill(0, 0, 3, panelHeight, accent);
+        context.fill(0, 0, panelWidth, 1, accent);
+        context.fill(0, panelHeight - 1, panelWidth, panelHeight, accent);
+
+        context.drawItem(objectiveIcon(entry.style), 8, 11);
+        context.drawText(textRenderer, Text.literal("目标提示"), 30, 5, accent, false);
+        context.drawText(textRenderer, Text.literal(trim(textRenderer, entry.message, panelWidth - 38)), 30, 20, 0xFFFFFFFF, true);
+        matrices.popMatrix();
+    }
+
+    private static int objectiveNoticePanelX(int panelWidth, ObjectiveNoticeEntry entry, long now) {
+        int travel = panelWidth + 16;
+        long entryElapsed = now - entry.startTimeMs;
+        if (entryElapsed < OBJECTIVE_NOTICE_IN_MS) {
+            float progress = smooth(entryElapsed / (float) OBJECTIVE_NOTICE_IN_MS);
+            return -travel + Math.round(travel * progress);
+        }
+
+        long topElapsed = entry.topStartTimeMs < 0L ? 0L : now - entry.topStartTimeMs;
+        long outStart = OBJECTIVE_NOTICE_IN_MS + OBJECTIVE_NOTICE_HOLD_MS;
+        if (entry.topStartTimeMs >= 0L && topElapsed > outStart) {
+            float progress = smooth((topElapsed - outStart) / (float) OBJECTIVE_NOTICE_OUT_MS);
+            return -Math.round(travel * progress);
+        }
+
+        return 0;
     }
 
     private static void renderDrawPanel(DrawContext context) {
@@ -353,6 +551,24 @@ public class WildcardDrawOverlay {
         };
     }
 
+    private static int objectiveBaseY(int screenHeight, int panelHeight) {
+        return Math.max(24, screenHeight / 2 - panelHeight / 2 - 18);
+    }
+
+    private static int scaledObjectiveSize(int size) {
+        return Math.max(1, Math.round(size * OBJECTIVE_PANEL_SCALE));
+    }
+
+    private static int objectiveAccent(String style) {
+        return switch (style) {
+            case "time" -> 0xFFFFD966;
+            case "item" -> 0xFF77E287;
+            case "coordinate" -> 0xFF7FC2FF;
+            case "hunter" -> 0xFFFF8A8A;
+            default -> 0xFF7FC2FF;
+        };
+    }
+
     private static int weaponHeatColor(int heat, int maxHeat) {
         if (heat <= 0) {
             return 0x00000000;
@@ -374,6 +590,15 @@ public class WildcardDrawOverlay {
             case "runner" -> new ItemStack(Items.DIAMOND);
             case "respawn" -> new ItemStack(Items.TOTEM_OF_UNDYING);
             case "hunter" -> new ItemStack(Items.IRON_SWORD);
+            default -> new ItemStack(Items.NETHER_STAR);
+        };
+    }
+
+    private static ItemStack objectiveIcon(String style) {
+        return switch (style) {
+            case "time" -> new ItemStack(Items.CLOCK);
+            case "item" -> new ItemStack(Items.DIAMOND);
+            case "coordinate" -> new ItemStack(Items.COMPASS);
             default -> new ItemStack(Items.NETHER_STAR);
         };
     }
@@ -435,6 +660,20 @@ public class WildcardDrawOverlay {
             this.title = title;
             this.line1 = line1;
             this.line2 = line2;
+            this.style = style;
+            this.startTimeMs = startTimeMs;
+        }
+    }
+
+    private static final class ObjectiveNoticeEntry {
+        private final String message;
+        private final String style;
+        private final long startTimeMs;
+        private long topStartTimeMs = -1L;
+        private float currentY = Float.NaN;
+
+        private ObjectiveNoticeEntry(String message, String style, long startTimeMs) {
+            this.message = message;
             this.style = style;
             this.startTimeMs = startTimeMs;
         }

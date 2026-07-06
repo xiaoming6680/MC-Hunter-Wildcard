@@ -18,7 +18,7 @@ public class HungerChaseRule implements WildcardRule {
     private static final int HUNGER_EFFECT_AMPLIFIER = 1;
     private static final int LOW_FOOD_SLOWNESS_TICKS = 45;
     private static final int FOOD_SPEED_TICKS = 100;
-    private static final int GOLDEN_FOOD_SPEED_TICKS = 120;
+    private static final int HIGH_VALUE_FOOD_SPEED_TICKS = 200;
 
     @Override
     public String getName() {
@@ -47,11 +47,17 @@ public class HungerChaseRule implements WildcardRule {
             return;
         }
 
-        boolean golden = eatenStack.isOf(Items.GOLDEN_APPLE) || eatenStack.isOf(Items.ENCHANTED_GOLDEN_APPLE);
-        player.addStatusEffect(new StatusEffectInstance(StatusEffects.SPEED, golden ? GOLDEN_FOOD_SPEED_TICKS : FOOD_SPEED_TICKS, golden ? 1 : 0, false, false, true));
+        boolean highValueFood = isHighValueFood(eatenStack);
+        player.addStatusEffect(new StatusEffectInstance(StatusEffects.SPEED, highValueFood ? HIGH_VALUE_FOOD_SPEED_TICKS : FOOD_SPEED_TICKS, highValueFood ? 1 : 0, false, false, true));
     }
 
     private boolean isFood(ItemStack stack) {
         return !stack.isEmpty() && stack.contains(DataComponentTypes.FOOD);
+    }
+
+    private boolean isHighValueFood(ItemStack stack) {
+        return stack.isOf(Items.GOLDEN_APPLE)
+                || stack.isOf(Items.ENCHANTED_GOLDEN_APPLE)
+                || stack.isOf(Items.GOLDEN_CARROT);
     }
 }
