@@ -365,7 +365,7 @@ public class WildcardDrawOverlay {
         context.fill(0, panelHeight - 1, panelWidth, panelHeight, withAlpha(accent, alpha));
 
         context.drawItem(objectiveIcon(objectiveStyle), 8, 10);
-        context.drawText(textRenderer, Text.literal("逃亡目标"), 30, 5, withAlpha(accent, alpha), false);
+        context.drawText(textRenderer, Text.literal("逃亡者状态"), 30, 5, withAlpha(accent, alpha), false);
         context.drawText(textRenderer, Text.literal(trim(textRenderer, objectiveText, panelWidth - 38)), 30, 20, withAlpha(0xFFFFFFFF, alpha), true);
         matrices.popMatrix();
     }
