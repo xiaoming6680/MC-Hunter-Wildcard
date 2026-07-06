@@ -43,7 +43,7 @@ Manhunt Wildcard 是一个用于 Minecraft Manhunt / 猎人追逃玩法的 Fabri
 ## 环境要求
 
 - Minecraft `1.21.11`
-- Fabric Loader `0.19.0+`
+- Fabric Loader `0.16.0+`
 - Fabric API
 - Java `21`
 

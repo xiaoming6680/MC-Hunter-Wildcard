@@ -43,7 +43,7 @@ This mod is partly inspired by a recent-season Apex Legends Wildcard event. The 
 ## Requirements
 
 - Minecraft `1.21.11`
-- Fabric Loader `0.19.0+`
+- Fabric Loader `0.16.0+`
 - Fabric API
 - Java `21`
 
