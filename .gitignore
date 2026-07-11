@@ -1,11 +1,44 @@
+# Gradle / Java build output
 .gradle/
 build/
-run/
 out/
-*.log
+bin/
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# Fabric / Minecraft local runtime data
+run/
+logs/
+crash-reports/
+*.log
+*.log.gz
+
+# IDE and editor local files
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+local.properties
+
+# JVM crash dumps
+hs_err_pid*
+replay_pid*
+*.hprof
 
 # Codex planning notes
 task_plan.md
